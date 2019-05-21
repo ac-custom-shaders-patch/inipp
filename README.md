@@ -9,8 +9,7 @@ In main mode, INIpp outputs data in JSON format, as not all data could be repres
 Please don’t think you need to read any of this in order to work with configs. All of this is mainly meant for standard includable files, in order to make creating actual configs easier. Now, they would look like this:
 
 ```ini
-[INCLUDE]
-INCLUDE = common/materials_carpaint.ini
+[INCLUDE: common/materials_carpaint.ini]
 CarPaintMaterial = Carpaint
 
 [Material_CarPaint]
@@ -70,7 +69,13 @@ INCLUDE = common/shared_file.ini
 INCLUDE = common/another_shared_file.ini
 ```
 
-Included file will be loaded in place of `[INCLUDE]` sectiosn, although with some extra detail (see “Variables”). Important to note: if some property is set twice, second value will be used. So, you can overwrite values in included files with sections coming afterwards.
+Included file will be loaded in place of `[INCLUDE]` sections, although with some extra detail (see “Variables”). Important to note: if some property is set twice, second value will be used. So, you can overwrite values in included files with sections coming afterwards.
+
+For shorter version, you can use this syntax:
+
+```ini
+[INCLUDE: common/shared_file.ini]
+```
 
 ### Variables
 
@@ -78,13 +83,11 @@ In order to try and reduce copy-paste, included INI-files can use variables. The
 
 ###### main.ini
 ```ini
-[INCLUDE]
-INCLUDE = extra.ini
+[INCLUDE: extra.ini]
 SomeVariable = 10
 
-[INCLUDE]
 ; value of “SomeVariable” won’t be available to “another_extra.ini”
-INCLUDE = another_extra.ini
+[INCLUDE: another_extra.ini]
 ```
 
 ###### extra.ini
@@ -312,6 +315,8 @@ PROP_1 = fresnelC, 0.08
 PROP_2 = fresnelEXP, 5
 ```
 
-# Licence
+# Known issues and TODOs
 
-MIT.
+- There is no support for vectors or colors in expressions, as well as outputting several values at once. Not entirely sure if it’s solvable at the moment, especially considering that, at least for now, **inipp** app uses Lua 5.3, and **CSP** uses LuaJIT 5.1.
+
+
