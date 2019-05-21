@@ -161,6 +161,22 @@ LETTERS_WITH_ZEROS = ${SomeVariable}0 ; A0, B0
 LETTERS_AND_LETTERS_IN_BRACKETS = prefix $OtherVariable ; prefix A, prefix B, prefix [A], prefix [B]
 ```
 
+### Skipping
+
+If needed, you can skip entire sections with `ACTIVE=0`. With this properly found, parser will skip all following properties, while keeping that one. That might be especially helpful with variables:
+
+```ini
+[SHADER_REPLACEMENT_...]
+ACTIVE=$UseSpecificReplacement  ; skip section if variable wasn’t set to 1
+MATERIALS=$SomeMaterialsToTweak
+SHADER=ksPerPixel
+
+[SHADER_REPLACEMENT_...]
+ACTIVE=${OtherMaterialsToTweak:count}  ; if materials are not set, whole section will be skipped
+MATERIALS=$OtherMaterialsToTweak
+SHADER=ksPerPixelNM
+```
+
 ### Templates
 
 With templates, you can create your own type of section which will unwrap into something different. Like so:
