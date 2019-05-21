@@ -9,16 +9,16 @@ In main mode, INIpp outputs data in JSON format, as not all data could be repres
 Please don’t think you need to read any of this in order to work with configs. All of this is mainly meant for standard includable files, in order to make creating actual configs easier. Now, they would look like this:
 
 ```ini
-[INCLUDE_...]
-INCLUDE=common/materials_carpaint.ini
-VAR_0=CarPaintMaterial, Carpaint
+[INCLUDE]
+INCLUDE = common/materials_carpaint.ini
+CarPaintMaterial = Carpaint
 
 [Material_CarPaint]
-Skins=?
-ClearCoatThickness=0.1
+Skins = ?
+ClearCoatThickness = 0.1
 
 [Material_CarPaint_Gold]
-Skins=yellow
+Skins = yellow
 ```
 
 And included file will unwrap it into regular `SHADER_REPLACEMENT_…` mess.
@@ -58,24 +58,33 @@ KEY_3 = and\, this\, is\, a\, single\, value
 
 ### Including
 
-One INI-file might reference other files, with `[INCLUDE]` or `[INCLUDE_...]` sections, like so:
+One INI-file might reference other files with `[INCLUDE]` sections, like so:
 
 ```ini
 [INCLUDE]
 INCLUDE = common/shared_file.ini
+
+[INCLUDE]
+; as a special section, you can define more than one of those, both files
+; will be included
+INCLUDE = common/another_shared_file.ini
 ```
 
-Included file will be loaded in place of `[INCLUDE]` section, although with some extra detail (see “Variables”). Important to note: if some property is set twice, second value will be used. So, you can overwrite values in included files with sections coming afterwards.
+Included file will be loaded in place of `[INCLUDE]` sectiosn, although with some extra detail (see “Variables”). Important to note: if some property is set twice, second value will be used. So, you can overwrite values in included files with sections coming afterwards.
 
 ### Variables
 
-In order to try and reduce copy-paste, included INI-files can use variables. Their values are set in `INCLUDE` sections, and the whole thing looks like this:
+In order to try and reduce copy-paste, included INI-files can use variables. Their values are set in `[INCLUDE]` sections, and the whole thing looks like this:
 
 ###### main.ini
 ```ini
 [INCLUDE]
 INCLUDE = extra.ini
-VAR_0 = SomeVariable, 10
+SomeVariable = 10
+
+[INCLUDE]
+; value of “SomeVariable” won’t be available to “another_extra.ini”
+INCLUDE = another_extra.ini
 ```
 
 ###### extra.ini
@@ -87,11 +96,13 @@ KEY = $SomeVariable
 KEY = ${SomeVariable} ; both ways of referring to variable would work
 ```
 
+**Important:** please prefer using CamelCase for variables (and, shown later in docs, templates). CSP, as most other apps, expects values in upper case, so there’ll be less chance of confict.
+
 Included files are able to specify default values for variables like so:
 
 ```ini
 [DEFAULTS]
-VAR_0 = SomeVariable, 10
+SomeVariable = 10
 
 [SECTION_1]
 KEY = $SomeVariable
@@ -103,7 +114,7 @@ Variable, of course, could be set to a list of values, as everything else:
 
 ```ini
 [DEFAULTS]
-VAR_0 = PointInSpace, 12.3, 14.6, -25.2
+PointInSpace = 12.3, 14.6, -25.2
 
 [SECTION_1]
 POINT = $PointInSpace
@@ -129,7 +140,7 @@ Concatenation is also supported:
 
 ```ini
 [DEFAULTS]
-VAR_0 = Prefix, ello
+Prefix = ello
 
 [SECTION_1]
 GREETING_0 = H${Prefix} World   ; works either with curly braces
@@ -142,8 +153,8 @@ Concatenation with several values would behave as expected as well, and also, on
 
 ```ini
 [DEFAULTS]
-VAR_0 = SomeVariable, A, B
-VAR_1 = OtherVariable, $SomeVariable, "[$SomeVariable]"
+SomeVariable = A, B
+OtherVariable = $SomeVariable, "[$SomeVariable]"
 
 [SECTION_1]
 LETTERS_WITH_ZEROS = ${SomeVariable}0 ; A0, B0
@@ -173,13 +184,15 @@ SHADER = smCarPaint
 SKINS = new_skin
 ```
 
+**Important:** please prefer using CamelCase for templates and variables. CSP, as most other apps, expects values in upper case, so there’ll be less chance of confict.
+
 Templates, of course, can also specify default section name, which will be used if no specific is set:
 
 ```ini
 [TEMPLATE: Material_CarPaint]
-VAR_DEFAULT_0 = CarPaintShader, smCarPaint  ; this is how pattern can define value by default
-OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...   ; I highly recommend to use “...” in there: the whole idea 
-                                            ; of templates was to be able to use them more than once
+CarPaintShader = smCarPaint                ; this is how pattern can define value by default
+OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...  ; I highly recommend to use “...” in there: the whole idea 
+                                           ; of templates was to be able to use them more than once
 SHADER = $CarPaintShader
 MATERIALS = $CarPaintMaterial
 
@@ -245,8 +258,8 @@ On its own, it’s not very helpful, but could be convenient once variables join
 OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...
 SHADER = smCarPaint
 MATERIALS = $CarPaintMaterial
-VAR_DEFAULT_0 = Reflectiveness, 0.8
-VAR_DEFAULT_1 = FresnelF0, 0.2
+Reflectiveness = 0.8
+FresnelF0 = 0.2
 PROP_0 = fresnelMaxLevel, $Reflectiveness
 PROP_1 = fresnelC, $" $Reflectiveness * $FresnelF0 "
 PROP_2 = fresnelEXP, 5  ; that’s the correct value for this one in most cases, by the way, at least 
