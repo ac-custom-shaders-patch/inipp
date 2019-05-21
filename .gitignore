@@ -332,3 +332,14 @@ ASALocalRun/
 
 # Local History for Visual Studio
 .localhistory/
+
+# This project shares directory with Custom Shaders Patch, but only
+# a few files are needed, and symlinking only required files didn’t work
+
+inipp/utility/*
+!inipp/utility/alphanum*
+!inipp/utility/filesystem*
+!inipp/utility/ini_parser*
+!inipp/utility/json*
+!inipp/utility/string_codecvt*
+!inipp/utility/variant*
