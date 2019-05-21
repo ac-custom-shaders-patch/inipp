@@ -186,13 +186,13 @@ SKINS = new_skin
 
 **Important:** please prefer using CamelCase for templates and variables. CSP, as most other apps, expects values in upper case, so there’ll be less chance of confict.
 
-Templates, of course, can also specify default section name, which will be used if no specific is set:
+Templates, of course, can also specify default section name, which will be used if no specific is set, with `@OUTPUT` property:
 
 ```ini
 [TEMPLATE: Material_CarPaint]
-CarPaintShader = smCarPaint                ; this is how pattern can define value by default
-OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...  ; I highly recommend to use “...” in there: the whole idea 
-                                           ; of templates was to be able to use them more than once
+CarPaintShader = smCarPaint                 ; this is how pattern can define value by default
+@OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...  ; I highly recommend to use “...” in there: the whole idea 
+                                            ; of templates was to be able to use them more than once
 SHADER = $CarPaintShader
 MATERIALS = $CarPaintMaterial
 
@@ -212,7 +212,7 @@ On top of that, templates can inherit one another:
 
 ```ini
 [TEMPLATE: Material_CarPaint]
-OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...
+@OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...
 SHADER = smCarPaint
 MATERIALS = $CarPaintMaterial
 
@@ -255,7 +255,7 @@ On its own, it’s not very helpful, but could be convenient once variables join
 
 ```ini
 [TEMPLATE: Material_CarPaint]
-OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...
+@OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...
 SHADER = smCarPaint
 MATERIALS = $CarPaintMaterial
 Reflectiveness = 0.8
