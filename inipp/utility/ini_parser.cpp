@@ -323,7 +323,7 @@ namespace utils
 	{
 		auto key = name.filename().string();
 		std::transform(key.begin(), key.end(), key.begin(), tolower);
-		for (auto i : lua_state.imported)
+		for (const auto& i : lua_state.imported)
 		{
 			if (i == key) return;
 		}
@@ -500,30 +500,24 @@ namespace utils
 		variable_info(const std::string& name, int from, int to) : name(name), substr_from(from), substr_to(to), with_fallback(false) {}
 		variable_info(const std::string& name, special_mode mode) : name(name), with_fallback(false), mode(mode) {}
 
-		void substitute(const variable_scope& include_vars, const value_finalizer& dest)
+		bool get_values(const variable_scope& include_vars, std::vector<std::string>& result)
 		{
 			const auto v = include_vars.find(name);
 			if (!v)
 			{
-#if defined _DEBUG && defined USE_SIMPLE
-				// std::cerr << "Missing variable: " << name << '\n';
-#endif
-				if (with_fallback)
+				if (mode == special_mode::size)
 				{
-					dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
+					result.emplace_back("0");
+					return true;
 				}
-				else if (dest.params.error_handler)
-				{
-					dest.params.error_handler->on_warning(dest.params.file, ("Missing variable: " + name).c_str());
-				}
-				return;
+				return false;
 			}
 
 			switch (mode)
 			{
 			case special_mode::size:
 				{
-					dest.add(std::to_string(v->data().size()));
+					result.push_back(std::to_string(v->data().size()));
 					break;
 				}
 			case special_mode::none:
@@ -532,7 +526,7 @@ namespace utils
 					if (substr_from < 0) substr_from += int(v->data().size());
 					for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
 					{
-						dest.add(v->data()[j]);
+						result.push_back(v->data()[j]);
 					}
 					break;
 				}
@@ -540,6 +534,24 @@ namespace utils
 				{
 					break;
 				}
+			}
+			return true;
+		}
+
+		void substitute(const variable_scope& include_vars, const value_finalizer& dest)
+		{
+			std::vector<std::string> result;
+			if (get_values(include_vars, result))
+			{
+				for (const auto& r : result) dest.add(r);
+			}
+			else if (with_fallback)
+			{
+				dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
+			}
+			else if (dest.params.error_handler)
+			{
+				dest.params.error_handler->on_warning(dest.params.file, ("Missing variable: " + name).c_str());
 			}
 		}
 
@@ -558,8 +570,8 @@ namespace utils
 		void substitute(const variable_scope& include_vars, const std::string& prefix, const std::string& postfix, const value_finalizer& dest,
 			bool expr_mode)
 		{
-			const auto v = include_vars.find(name);
-			if (!v)
+			std::vector<std::string> result;
+			if (!get_values(include_vars, result) && !expr_mode)
 			{
 #if defined _DEBUG && defined USE_SIMPLE
 				// std::cerr << "Missing variable: " << name << '\n';
@@ -580,33 +592,27 @@ namespace utils
 				}
 				return;
 			}
-			if (substr_to < 0 || substr_to == 0 && substr_from < 0) substr_to += int(v->data().size());
-			if (substr_from < 0) substr_from += int(v->data().size());
 
 			if (expr_mode)
 			{
 				auto s = prefix;
-				std::vector<std::string> wrapped_values;
-				for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
-				{
-					wrapped_values.push_back(v->data()[j]);
-					substitute_wrap(wrapped_values[wrapped_values.size() - 1]);
-				}
-				if (wrapped_values.empty())
+				if (result.empty())
 				{
 					s += "nil";
 				}
-				else if (wrapped_values.size() == 1)
+				else if (result.size() == 1)
 				{
-					s += wrapped_values[0];
+					substitute_wrap(result[0]);
+					s += result[0];
 				}
 				else
 				{
 					s += "{";
-					for (auto j = 0, jt = int(wrapped_values.size()); j < jt; j++)
+					for (auto j = 0, jt = int(result.size()); j < jt; j++)
 					{
 						if (j) s += ",";
-						s += wrapped_values[j];
+						substitute_wrap(result[j]);
+						s += result[j];
 					}
 					s += "}";
 				}
@@ -615,10 +621,10 @@ namespace utils
 			}
 			else
 			{
-				for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
+				for (const auto& r : result)
 				{
 					auto s = prefix;
-					s += v->data()[j];
+					s += r;
 					s += postfix;
 					dest.add(s);
 				}
@@ -735,9 +741,9 @@ namespace utils
 		// std::string result_name;
 		std::string name;
 		section values;
-		section params;
 		section include_vars;
 		std::vector<section_template*> parents;
+		std::vector<section_template*> referenced_mixins;
 	};
 
 	struct current_section_info
@@ -746,6 +752,7 @@ namespace utils
 		section* target_section;
 		section_template* target_template;
 		std::vector<section_template*> referenced_templates;
+		std::vector<section_template*> referenced_section_mixins;
 	};
 
 	using ini_data = std::unordered_map<std::string, section>;
@@ -755,6 +762,7 @@ namespace utils
 		ini_data* own_sections{};
 		ini_data& sections;
 		std::unordered_map<std::string, section_template> templates;
+		std::unordered_map<std::string, section_template> mixins;
 		bool allow_includes = false;
 		bool allow_override = true;
 		bool allow_lua = true;
@@ -833,6 +841,54 @@ namespace utils
 			return {dest, params, true};
 		}
 
+		bool resolve_mixins(const variable_scope& sc, const std::vector<section_template*>& mixins,
+			current_section_info& c, std::vector<std::string>& referenced_variables, int scope) const
+		{
+			if (scope > 10) return true;
+			for (auto m : mixins)
+			{
+				auto scm = sc;
+				scm.scopes.push_back(m->include_vars);
+				scm.scopes.push_back(m->values);
+
+				auto m_active = m->values.find("@ACTIVE");
+				if (m_active != m->values.end())
+				{
+					variant m_active_v;
+					for (const auto& piece : m_active->second.data())
+					{
+						substitute_variable(piece, scm, get_value_finalizer(m_active_v.data()), 0, &referenced_variables);
+					}
+					if (!m_active_v.as<bool>()) goto NextMixin_1;
+				}
+
+				for (const auto& v : m->values)
+				{
+					if (v.first == "@ACTIVE") continue;
+					if ((*c.target_section).find(v.first) != (*c.target_section).end()) continue;
+					auto& dest = (*c.target_section)[v.first].data();
+					for (const auto& piece : v.second.data())
+					{
+						substitute_variable(piece, scm, get_value_finalizer(dest), 0, &referenced_variables);
+					}
+					if (v.first == "ACTIVE" && !(*c.target_section)[v.first].as<bool>())
+					{
+						(*c.target_section).clear();
+						(*c.target_section)["ACTIVE"] = "0";
+						return false;
+					}
+				}
+
+				if (!resolve_mixins(sc, m->referenced_mixins, c, referenced_variables, scope + 1))
+				{
+					return false;
+				}
+
+			NextMixin_1: {}
+			}
+			return true;
+		}
+
 		void parse_ini_section_finish(current_section_info& c)
 		{
 			if (!c.target_section) return;
@@ -844,10 +900,14 @@ namespace utils
 				{
 					variable_scope sc;
 					sc.scopes.push_back(*c.target_section);
-					sc.scopes.push_back(t->params);
-					sc.scopes.push_back(t->include_vars);
 					sc.scopes.push_back(include_vars);
+					sc.scopes.push_back(t->include_vars);
 					sc.scopes.push_back(t->values);
+					if (!resolve_mixins(sc, t->referenced_mixins, c, referenced_variables, 0))
+					{
+						return;
+					}
+
 					for (const auto& v : t->values)
 					{
 						if (v.first == "@OUTPUT") continue;
@@ -864,6 +924,21 @@ namespace utils
 							return;
 						}
 					}
+				}
+				for (const auto& v : referenced_variables)
+				{
+					(*c.target_section).erase(v);
+				}
+			}
+
+			{
+				std::vector<std::string> referenced_variables;
+				variable_scope sc;
+				sc.scopes.push_back(*c.target_section);
+				sc.scopes.push_back(include_vars);
+				if (!resolve_mixins(sc, c.referenced_section_mixins, c, referenced_variables, 0))
+				{
+					return;
 				}
 				for (const auto& v : referenced_variables)
 				{
@@ -927,6 +1002,13 @@ namespace utils
 		static std::vector<std::string> split_string_quotes(std::string& str)
 		{
 			std::vector<std::string> result;
+
+			if (is_solid(str, 0))
+			{
+				result.push_back(str);
+				return result;
+			}
+
 			auto last_nonspace = 0;
 			auto q = -1;
 			auto u = false, w = false;
@@ -1029,68 +1111,66 @@ namespace utils
 			const auto new_key = allow_override || !c.referenced_templates.empty() || (c.target_section
 				? (*c.target_section).find(key) == (*c.target_section).end()
 				: (*c.target_template).values.find(key) == (*c.target_template).values.end());
-			if (!is_solid(data, started) && end_at == -1)
-			{
-				std::vector<std::string> value_splitted;
-				for (const auto& value_piece : split_string_quotes(value))
-				{
-					if (c.section_key == "DEFAULTS" || c.section_key == "INCLUDE" || c.target_template)
-					{
-						value_splitted.push_back(value_piece);
-					}
-					else
-					{
-						variable_scope sc;
-						if (!c.referenced_templates.empty())
-						{
-							sc.scopes.push_back(*c.target_section);
-							for (auto r : c.referenced_templates)
-							{
-								sc.scopes.push_back(r->params);
-								sc.scopes.push_back(r->include_vars);
-							}
-						}
-						sc.scopes.push_back(include_vars);
-						substitute_variable(value_piece, sc, get_value_finalizer(value_splitted), 0, nullptr);
-					}
-				}
 
-				if (c.target_section)
+			std::vector<std::string> value_splitted;
+			for (const auto& value_piece : split_string_quotes(value))
+			{
+				if (c.section_key == "DEFAULTS" || c.section_key == "INCLUDE" || c.target_template)
 				{
-					if (key == "ACTIVE" && !variant(value_splitted).as<bool>())
-					{
-						(*c.target_section)[key] = value_splitted;
-						c.target_section = nullptr;
-					}
-					else if (c.section_key == "DEFAULTS")
-					{
-						if (include_vars.find(key) == include_vars.end())
-						{
-							include_vars[key] = value_splitted;
-						}
-					}
-					else if (new_key)
-					{
-						(*c.target_section)[key] = value_splitted;
-					}
-					else if (c.section_key == "INCLUDE" && key == "INCLUDE")
-					{
-						auto& existing = (*c.target_section)[key];
-						for (const auto& piece : value_splitted)
-						{
-							existing.data().push_back(piece);
-						}
-					}
+					value_splitted.push_back(value_piece);
 				}
 				else
 				{
-					(*c.target_template).values[key] = value_splitted;
+					variable_scope sc;
+					if (!c.referenced_templates.empty())
+					{
+						sc.scopes.push_back(*c.target_section);
+						for (auto r : c.referenced_templates)
+						{
+							sc.scopes.push_back(r->values); // Could be a problem?
+							sc.scopes.push_back(r->include_vars);
+						}
+					}
+					sc.scopes.push_back(include_vars);
+					substitute_variable(value_piece, sc, get_value_finalizer(value_splitted), 0, nullptr);
 				}
 			}
-			else if (new_key)
+
+			if (key.find("@MIXIN") == 0)
 			{
-				if (c.target_section) (*c.target_section)[key] = std::vector<std::string>{value};
-				else (*c.target_template).values[key] = std::vector<std::string>{value};
+				if (c.target_section) c.referenced_section_mixins.push_back(&mixins[value_splitted[0]]);
+				else c.target_template->referenced_mixins.push_back(&mixins[value_splitted[0]]);
+			}
+			else if (c.target_section)
+			{
+				if (key == "ACTIVE" && !variant(value_splitted).as<bool>())
+				{
+					(*c.target_section)[key] = value_splitted;
+					c.target_section = nullptr;
+				}
+				else if (c.section_key == "DEFAULTS")
+				{
+					if (include_vars.find(key) == include_vars.end())
+					{
+						include_vars[key] = value_splitted;
+					}
+				}
+				else if (new_key)
+				{
+					(*c.target_section)[key] = value_splitted;
+				}
+				else if (c.section_key == "INCLUDE" && key == "INCLUDE")
+				{
+					auto& existing = (*c.target_section)[key];
+					for (const auto& piece : value_splitted)
+					{
+						existing.data().push_back(piece);
+					}
+				}
+			}
+			else
+			{
+				(*c.target_template).values[key] = value_splitted;
 			}
 		}
 
@@ -1136,6 +1216,7 @@ namespace utils
 			std::string final_name;
 			auto separator = cs_keys.find_first_of(':');
 			auto is_template = false;
+			auto is_mixin = false;
 			if (separator != std::string::npos)
 			{
 				final_name = cs_keys.substr(0, separator);
@@ -1145,7 +1226,7 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back({final_name, &sections[final_name], nullptr, {}});
+					cs.push_back({final_name, &sections[final_name], nullptr, {}, {}});
 					(*cs[0].target_section)["INCLUDE"] = file;
 					return;
 				}
@@ -1154,7 +1235,7 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back({final_name, &sections[final_name], nullptr, {}});
+					cs.push_back({final_name, &sections[final_name], nullptr, {}, {}});
 					(*cs[0].target_section)["NAME"] = file;
 					return;
 				}
@@ -1163,60 +1244,75 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back({final_name, &sections[final_name], nullptr, {}});
+					cs.push_back({final_name, &sections[final_name], nullptr, {}, {}});
 					(*cs[0].target_section)["FILE"] = file;
 					return;
 				}
 
 				is_template = final_name == "TEMPLATE";
+				is_mixin = final_name == "MIXIN";
 				cs_keys = cs_keys.substr(separator + 1);
 			}
 
 			const auto section_names = split_string(cs_keys, ",", true, true);
-			std::vector<section_template*> referenced_templates;
-			if (!is_template)
-			{
-				auto section_names_inv = section_names;
-				std::reverse(section_names_inv.begin(), section_names_inv.end());
-				for (const auto& section_name : section_names_inv)
-				{
-					auto found_template = templates.find(section_name);
-					if (found_template != templates.end())
-					{
-						add_template(referenced_templates, &found_template->second);
-					}
-				}
-			}
 
-			if (is_template || referenced_templates.empty())
+			if (is_template)
 			{
-				for (auto cs_key : section_names)
+				for (const auto& cs_key : section_names)
 				{
-					if (is_template)
-					{
-						auto pieces = split_string(cs_key, " ", true, true);
+					auto pieces = split_string(cs_key, " ", true, true);
 
-						auto template_name = pieces[0];
-						templates[template_name].name = pieces[0];
-						templates[template_name].include_vars = include_vars;
-						if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
+					auto template_name = pieces[0];
+					templates[template_name].name = pieces[0];
+					templates[template_name].include_vars = include_vars;
+					if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
+					{
+						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
 						{
-							for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
-							{
-								trim_self(pieces[k], ", \t\r");
-								templates[template_name].parents.push_back(&templates[pieces[k]]);
-							}
+							trim_self(pieces[k], ", \t\r");
+							templates[template_name].parents.push_back(&templates[pieces[k]]);
 						}
-						cs.push_back({"", nullptr, &templates[template_name], {}});
 					}
-					else
+					cs.push_back({"", nullptr, &templates[template_name], {}, {}});
+				}
+				return;
+			}
+
+			if (is_mixin)
+			{
+				for (const auto& cs_key : section_names)
+				{
+					auto pieces = split_string(cs_key, " ", true, true);
+
+					auto template_name = pieces[0];
+					mixins[template_name].name = pieces[0];
+					mixins[template_name].include_vars = include_vars;
+					if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
 					{
-						parse_ini_fix_array(cs_key);
-						cs.push_back({cs_key, &sections[cs_key], nullptr, {}});
+						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
+						{
+							trim_self(pieces[k], ", \t\r");
+							mixins[template_name].parents.push_back(&mixins[pieces[k]]);
+						}
 					}
+					cs.push_back({"", nullptr, &mixins[template_name], {}, {}});
+				}
+				return;
+			}
+
+			std::vector<section_template*> referenced_templates;
+			auto section_names_inv = section_names;
+			std::reverse(section_names_inv.begin(), section_names_inv.end());
+			for (const auto& section_name : section_names_inv)
+			{
+				auto found_template = templates.find(section_name);
+				if (found_template != templates.end())
+				{
+					add_template(referenced_templates, &found_template->second);
 				}
 			}
-			else
+
+			if (!referenced_templates.empty())
 			{
 				if (final_name.empty())
 				{
@@ -1226,7 +1322,6 @@ namespace utils
 						if (name != t->values.end())
 						{
 							variable_scope sc;
-							sc.scopes.push_back(t->params);
 							sc.scopes.push_back(t->include_vars);
 							sc.scopes.push_back(include_vars);
 							std::vector<std::string> dest;
@@ -1242,7 +1337,22 @@ namespace utils
 				}
 				parse_ini_fix_array(final_name);
 				auto& templated = sections[final_name];
-				cs.push_back({final_name, &templated, nullptr, referenced_templates});
+				cs.push_back({final_name, &templated, nullptr, referenced_templates, {}});
+				/*auto& cc = cs[cs.size() - 1];
+				for (auto t : referenced_templates)
+				{
+					for (auto& m : t->referenced_mixins)
+					{
+						cc.referenced_section_mixins[m.first] = m.second;
+					}
+				}*/
+				return;
+			}
+
+			for (auto cs_key : section_names)
+			{
+				parse_ini_fix_array(cs_key);
+				cs.push_back({cs_key, &sections[cs_key], nullptr, {}, {}});
 			}
 		}
 
