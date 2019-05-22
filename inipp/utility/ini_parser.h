@@ -36,11 +36,15 @@ namespace utils
 		const ini_parser& parse_file(const path& path, const ini_parser_reader& reader,
 			const ini_parser_error_handler& error_handler = ini_parser_error_handler{}) const;
 		const ini_parser& finalize() const;
+		void finalize_end() const;
 
-		std::string to_string() const;
 		const std::unordered_map<std::string, section>& get_sections() const;
 
-		static std::string to_string(const std::unordered_map<std::string, section>& sections);
+		std::string to_ini() const;
+		std::string to_json(bool format = false) const;
+
+		static std::string to_ini(const std::unordered_map<std::string, section>& sections);
+		static std::string to_json(const std::unordered_map<std::string, section>& sections, bool format = false);
 
 	private:
 		struct ini_parser_data* data_;

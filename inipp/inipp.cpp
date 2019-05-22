@@ -81,27 +81,8 @@ struct error_handler : utils::ini_parser_error_handler
 
 static std::string serialize(const utils::ini_parser& parser, bool output_format, bool output_ini)
 {
-	if (output_ini) return parser.to_string();
-
-	using namespace nlohmann;
-	auto sections = parser.get_sections();
-	auto result = json::object();
-	for (const auto& s : sections)
-	{
-		for (const auto& k : s.second)
-		{
-			auto& v = result[s.first][k.first] = json::array();
-			for (auto d : k.second.data())
-			{
-				v.push_back(d);
-			}
-		}
-	}
-
-	std::stringstream r;
-	if (output_format) r << std::setw(2) << result << '\n';
-	else r << result << '\n';
-	return r.str();
+	if (output_ini) return parser.to_ini();
+	return parser.to_json(output_format);
 }
 
 int main(int argc, const char* argv[])
@@ -195,7 +176,7 @@ int main(int argc, const char* argv[])
 	}
 	catch (std::exception const& e)
 	{
-		std::cerr << e.what();
+		std::cerr << e.what() << '\n';
 		return 1;
 	}
 }

@@ -10,6 +10,10 @@
 #include <ostream>
 #include "string_codecvt.h"
 
+#ifndef USE_SIMPLE
+#include "special_folder.h"
+#endif
+
 typedef unsigned char byte;
 
 namespace utils
