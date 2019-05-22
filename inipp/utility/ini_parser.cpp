@@ -749,10 +749,19 @@ namespace utils
 	struct current_section_info
 	{
 		std::string section_key;
-		section* target_section;
-		section_template* target_template;
+		section* target_section{};
+		section_template* target_template{};
 		std::vector<section_template*> referenced_templates;
 		std::vector<section_template*> referenced_section_mixins;
+
+		explicit current_section_info(section_template* target_template)
+			: target_template(target_template) { }
+
+		current_section_info(const std::string& key, section* section)
+			: section_key(key), target_section(section) { }
+
+		current_section_info(const std::string& key, section* section, std::vector<section_template*> templates)
+			: section_key(key), target_section(section), referenced_templates(templates) { }
 	};
 
 	using ini_data = std::unordered_map<std::string, section>;
@@ -977,15 +986,20 @@ namespace utils
 						if (p.first != "INCLUDE") include_vars[p.first] = p.second;
 					}
 
-					for (auto& i : to_include->second.data())
+					// It’s important to copy values and clear section before parsing included files: those
+					// files might have their own includes, overwriting this one and breaking c.target_section pointer 
+					auto values = to_include->second.data();
+					c.target_section->clear();
+
+					for (auto& i : values)
 					{
 						parse_file(find_referenced(i));
 					}
 
 					current_file = previous_file;
 					include_vars = previous_vars;
+					return;
 				}
-				c.target_section->clear();
 			}
 
 			if (c.target_section->empty())
@@ -1226,7 +1240,7 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back({final_name, &sections[final_name], nullptr, {}, {}});
+					cs.push_back(current_section_info{final_name, &sections[final_name]});
 					(*cs[0].target_section)["INCLUDE"] = file;
 					return;
 				}
@@ -1235,7 +1249,7 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back({final_name, &sections[final_name], nullptr, {}, {}});
+					cs.push_back(current_section_info{final_name, &sections[final_name]});
 					(*cs[0].target_section)["NAME"] = file;
 					return;
 				}
@@ -1244,7 +1258,7 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back({final_name, &sections[final_name], nullptr, {}, {}});
+					cs.push_back(current_section_info{final_name, &sections[final_name]});
 					(*cs[0].target_section)["FILE"] = file;
 					return;
 				}
@@ -1273,7 +1287,7 @@ namespace utils
 							templates[template_name].parents.push_back(&templates[pieces[k]]);
 						}
 					}
-					cs.push_back({"", nullptr, &templates[template_name], {}, {}});
+					cs.push_back(current_section_info{&templates[template_name]});
 				}
 				return;
 			}
@@ -1295,7 +1309,7 @@ namespace utils
 							mixins[template_name].parents.push_back(&mixins[pieces[k]]);
 						}
 					}
-					cs.push_back({"", nullptr, &mixins[template_name], {}, {}});
+					cs.push_back(current_section_info{&mixins[template_name]});
 				}
 				return;
 			}
@@ -1337,7 +1351,7 @@ namespace utils
 				}
 				parse_ini_fix_array(final_name);
 				auto& templated = sections[final_name];
-				cs.push_back({final_name, &templated, nullptr, referenced_templates, {}});
+				cs.push_back(current_section_info{final_name, &templated, referenced_templates});
 				/*auto& cc = cs[cs.size() - 1];
 				for (auto t : referenced_templates)
 				{
@@ -1352,7 +1366,7 @@ namespace utils
 			for (auto cs_key : section_names)
 			{
 				parse_ini_fix_array(cs_key);
-				cs.push_back({cs_key, &sections[cs_key], nullptr, {}, {}});
+				cs.push_back(current_section_info{cs_key, &sections[cs_key]});
 			}
 		}
 
