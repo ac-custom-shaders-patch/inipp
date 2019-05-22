@@ -261,6 +261,28 @@ SKINS = some_skin
 
 Isn’t that nice? And consider that in everyday usage, mess that is templates will be hidden in included files.
 
+### Mixins
+
+Mixins are similar to templates, but could be deactivated with a condition, making them helpful in some specific cases. For example, imagine a template receiving either list of meshes or materials, and it needs to set `MESHES = ${Meshes}` or `MATERIALS = ${Materials}`, but with a condition that empty list shouldn’t be set at all (`MESHES=` could mean that thing should be applied to none meshes). With mixins, it’s an easy thing to set:
+
+```ini
+[MIXIN: _MeshesFilter]
+ACTIVE = ${Meshes:count}
+MESHES = ${Meshes}
+
+[MIXIN: _MaterialsFilter]
+ACTIVE = ${Materials:count}
+MATERIALS = ${Materials}
+
+[TEMPLATE: Material_DigitalScreen]
+@OUTPUT = SHADER_REPLACEMENT_0_SCREEN_...
+ACTIVE = $" ${Meshes:count} + ${Materials:count} "
+@MIXIN = _MeshesFilter
+@MIXIN = _MaterialsFilter
+```
+
+Not only templates, but any section can refer to a mixin. Also, mixins can include other mixins as well. Plus, `extends` keyword allows to build one mixins on top of others similar to templates.
+
 ### Expressions
 
 This one is simple. If you add “$” in front of a string, its value will be calculated, thanks to Lua interpreter:
