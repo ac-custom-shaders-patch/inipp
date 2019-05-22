@@ -973,7 +973,7 @@ namespace utils
 				else if (error_handler) error_handler->on_warning(current_file, ("Referenced file is missing: " + name).c_str());
 				c.target_section->clear();
 			}
-			else if (c.section_key == "INCLUDE")
+			else if (c.section_key.find("INCLUDE") == 0)
 			{
 				auto to_include = c.target_section->find("INCLUDE");
 				if (to_include != c.target_section->end())
@@ -983,7 +983,9 @@ namespace utils
 
 					for (const auto& p : *c.target_section)
 					{
-						if (p.first != "INCLUDE") include_vars[p.first] = p.second;
+						if (p.first == "INCLUDE") continue;
+						if (p.first.find("VAR") == 0) include_vars[p.second.as<std::string>()] = p.second.as<variant>(1);
+						else include_vars[p.first] = p.second;
 					}
 
 					// It’s important to copy values and clear section before parsing included files: those
@@ -1164,9 +1166,11 @@ namespace utils
 				}
 				else if (c.section_key == "DEFAULTS")
 				{
-					if (include_vars.find(key) == include_vars.end())
+					const auto compatible_mode = key.find("VAR") == 0 && !value_splitted.empty();
+					const auto& actual_key = compatible_mode ? value_splitted[0] : key;
+					if (include_vars.find(actual_key) == include_vars.end())
 					{
-						include_vars[key] = value_splitted;
+						include_vars[actual_key] = compatible_mode ? variant(value_splitted).as<variant>(1) : value_splitted;
 					}
 				}
 				else if (new_key)
