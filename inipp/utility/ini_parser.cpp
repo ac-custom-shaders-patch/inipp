@@ -180,7 +180,8 @@ namespace utils
 			return;
 		}
 
-		dest.push_back(prefix + lua_tolstring(L, -1, nullptr) + postfix);
+		const auto s = lua_tolstring(L, -1, nullptr);
+		dest.push_back(s ? prefix + s + postfix : prefix + postfix);
 	}
 
 	static void lua_register_function(const std::string& name, const variant& args, const std::string& body,

@@ -24,25 +24,11 @@
 
 #include <functional>
 #include <string>
-#include <sstream>
 
 namespace doj
 {
 	bool alphanum_isdigit(char c);
 	int alphanum_impl(const char* l, const char* r);
-
-	template <typename lT, typename rT>
-	int alphanum_comp(const lT& left, const rT& right)
-	{
-		std::ostringstream l;
-		l << left;
-		std::ostringstream r;
-		r << right;
-		return alphanum_impl(l.str().c_str(), r.str().c_str());
-	}
-
-	template <>
-	int alphanum_comp<std::string>(const std::string& l, const std::string& r);
 
 	int alphanum_comp(char* l, char* r);
 	int alphanum_comp(const char* l, const char* r);
@@ -52,13 +38,5 @@ namespace doj
 	int alphanum_comp(char* l, const std::string& r);
 	int alphanum_comp(const std::string& l, const char* r);
 	int alphanum_comp(const char* l, const std::string& r);
-
-	template <class Ty>
-	struct alphanum_less : public std::binary_function<Ty, Ty, bool>
-	{
-		bool operator()(const Ty& left, const Ty& right) const
-		{
-			return alphanum_comp(left, right) < 0;
-		}
-	};
+	int alphanum_comp(const std::string& l, const std::string& r);
 }

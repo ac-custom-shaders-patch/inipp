@@ -74,61 +74,48 @@ namespace doj
 		return 0;
 	}
 
-	template <>
-	int alphanum_comp<std::basic_string<char>, std::basic_string<char>>(const std::string& l, const std::string& r)
-	{
-		return alphanum_impl(l.c_str(), r.c_str());
-	}
-
 	int alphanum_comp(char* l, char* r)
 	{
-		assert(l);
-		assert(r);
 		return alphanum_impl(l, r);
 	}
 
 	int alphanum_comp(const char* l, const char* r)
 	{
-		assert(l);
-		assert(r);
 		return alphanum_impl(l, r);
 	}
 
 	int alphanum_comp(char* l, const char* r)
 	{
-		assert(l);
-		assert(r);
 		return alphanum_impl(l, r);
 	}
 
 	int alphanum_comp(const char* l, char* r)
 	{
-		assert(l);
-		assert(r);
 		return alphanum_impl(l, r);
 	}
 
 	int alphanum_comp(const std::string& l, char* r)
 	{
-		assert(r);
 		return alphanum_impl(l.c_str(), r);
 	}
 
 	int alphanum_comp(char* l, const std::string& r)
 	{
-		assert(l);
 		return alphanum_impl(l, r.c_str());
 	}
 
 	int alphanum_comp(const std::string& l, const char* r)
 	{
-		assert(r);
 		return alphanum_impl(l.c_str(), r);
 	}
 
 	int alphanum_comp(const char* l, const std::string& r)
 	{
-		assert(l);
 		return alphanum_impl(l, r.c_str());
+	}
+
+	int alphanum_comp(const std::string& l, const std::string& r)
+	{
+		return alphanum_impl(l.c_str(), r.c_str());
 	}
 }
