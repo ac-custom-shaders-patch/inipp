@@ -362,3 +362,10 @@ PRIVATE = 0                       ; again, if set to 1, Lua state will be reset 
 - Possibly, something for scripts to iterate all keys in a section?
 - As well as produce new key/value pairs?
 - And maybe even new sections procedurally? If there would be a need for that, why not.
+
+# Credits
+
+- For working with files and values, some code from [Reshade](https://github.com/crosire/reshade) by crosire is used;
+- For sorting, [alphanum.hpp](http://www.davekoelle.com/alphanum.html) by David Koelle;
+- JSON is serialized with [library by Niels Lohmann](https://github.com/nlohmann/json);
+- Expressions are made possible by [Lua](https://www.lua.org/).
