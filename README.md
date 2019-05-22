@@ -355,8 +355,10 @@ Some common functions could be moved into an external Lua-file, which can be inc
 PRIVATE = 0                       ; again, if set to 1, Lua state will be reset before loading next file
 ```
 
-# Known issues and TODOs
+# Known issues and plans
 
-- There is no support for vectors or colors in expressions. At least they can receive and output tables though.
-
-
+- Auto-indexing values;
+- There is no support for vectors or colors in expressions. At least they can receive and output tables though;
+- Possibly, something for scripts to iterate all keys in a section?
+- As well as produce new key/value pairs?
+- And maybe even new sections procedurally? If there would be a need for that, why not.
