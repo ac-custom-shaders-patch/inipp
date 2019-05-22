@@ -261,6 +261,28 @@ SKINS = some_skin
 
 Isn’t that nice? And consider that in everyday usage, mess that is templates will be hidden in included files.
 
+### Mixins
+
+Mixins are similar to templates, but could be deactivated with a condition, making them helpful in some specific cases. For example, imagine a template receiving either list of meshes or materials, and it needs to set `MESHES = ${Meshes}` or `MATERIALS = ${Materials}`, but with a condition that empty list shouldn’t be set at all (`MESHES=` could mean that thing should be applied to none meshes). With mixins, it’s an easy thing to set:
+
+```ini
+[MIXIN: _MeshesFilter]
+ACTIVE = ${Meshes:count}
+MESHES = ${Meshes}
+
+[MIXIN: _MaterialsFilter]
+ACTIVE = ${Materials:count}
+MATERIALS = ${Materials}
+
+[TEMPLATE: Material_DigitalScreen]
+@OUTPUT = SHADER_REPLACEMENT_0_SCREEN_...
+ACTIVE = $" ${Meshes:count} + ${Materials:count} "
+@MIXIN = _MeshesFilter
+@MIXIN = _MaterialsFilter
+```
+
+Not only templates, but any section can refer to a mixin. Also, mixins can include other mixins as well. Plus, `extends` keyword allows to build one mixins on top of others similar to templates.
+
 ### Expressions
 
 This one is simple. If you add “$” in front of a string, its value will be calculated, thanks to Lua interpreter:
@@ -357,8 +379,13 @@ PRIVATE = 0                       ; again, if set to 1, Lua state will be reset 
 
 # Known issues and plans
 
-- Auto-indexing values;
-- There is no support for vectors or colors in expressions. At least they can receive and output tables though;
-- Possibly, something for scripts to iterate all keys in a section?
-- As well as produce new key/value pairs?
-- And maybe even new sections procedurally? If there would be a need for that, why not.
+- Auto-indexing values might have been a nice addition;
+- There is no support for vectors or colors in expressions. At least they can receive and output tables now;
+- Possibly, scripts could have read & write access to whole section (a bit tricky to do with that Lua C functions though).
+
+# Credits
+
+- For working with files and values, some code from [Reshade](https://github.com/crosire/reshade) by crosire is used;
+- For sorting, [alphanum.hpp](http://www.davekoelle.com/alphanum.html) by David Koelle;
+- JSON is serialized with [library by Niels Lohmann](https://github.com/nlohmann/json);
+- Expressions are made possible by [Lua](https://www.lua.org/).
