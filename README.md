@@ -267,11 +267,11 @@ Mixins are similar to templates, but could be deactivated with a condition, maki
 
 ```ini
 [MIXIN: _MeshesFilter]
-ACTIVE = ${Meshes:count}
+@ACTIVE = ${Meshes:count}
 MESHES = ${Meshes}
 
 [MIXIN: _MaterialsFilter]
-ACTIVE = ${Materials:count}
+@ACTIVE = ${Materials:count}
 MATERIALS = ${Materials}
 
 [TEMPLATE: Material_DigitalScreen]
@@ -381,7 +381,7 @@ PRIVATE = 0                       ; again, if set to 1, Lua state will be reset 
 
 - Auto-indexing values might have been a nice addition;
 - There is no support for vectors or colors in expressions. At least they can receive and output tables now;
-- Possibly, scripts could have read & write access to whole section (a bit tricky to do with that Lua C functions though).
+- Possibly, scripts could have read & write access to whole section.
 
 # Credits
 
