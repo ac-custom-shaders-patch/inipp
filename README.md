@@ -379,11 +379,9 @@ PRIVATE = 0                       ; again, if set to 1, Lua state will be reset 
 
 # Known issues and plans
 
-- Auto-indexing values;
-- There is no support for vectors or colors in expressions. At least they can receive and output tables though;
-- Possibly, something for scripts to iterate all keys in a section?
-- As well as produce new key/value pairs?
-- And maybe even new sections procedurally? If there would be a need for that, why not.
+- Auto-indexing values might have been a nice addition;
+- There is no support for vectors or colors in expressions. At least they can receive and output tables now;
+- Possibly, scripts could have read & write access to whole section (a bit tricky to do with that Lua C functions though).
 
 # Credits
 
