@@ -315,8 +315,48 @@ PROP_1 = fresnelC, 0.08
 PROP_2 = fresnelEXP, 5
 ```
 
+**Important:** variables substitution works differently for expressions. Strings get wrapped in quotes, and if variable is a list, it’ll be passed as a table. Also, of course, if expression returns table, it’ll turn into a list.
+
+### Functions
+
+To simplify writing expressions, it’s possible to define functions. Here is an example:
+
+```ini
+; this function turns color from HEX or 0–255 format into regular normalized numbers
+[FUNCTION: ParseColor]
+ARGUMENTS = v  ; input arguments to be used in code below
+PRIVATE = 0    ; if set to 1, Lua state will be reset before loading next file
+CODE='
+  if type(v) == "string" and v:sub(1, 1) == "#" then 
+    if #v == 7 then return { tonumber(v:sub(2, 3), 16) / 255, tonumber(v:sub(4, 5), 16) / 255, tonumber(v:sub(6, 7), 16) / 255 } end
+    if #v == 4 then return { tonumber(v:sub(2, 2), 16) / 15, tonumber(v:sub(3, 3), 16) / 15, tonumber(v:sub(4, 4), 16) / 15 } end
+    error("Invalid color: "..v)
+  end
+  if type(v) == "table" and #v == 3 and ( v[1] > 1 or v[2] > 1 or v[3] > 1 ) then return { v[1] / 255, v[2] / 255, v[3] / 255 } end
+  return v'
+  
+[DEFAULTS]
+ColorHex = #abcdef
+ColorHexShort = #f80
+ColorRgb = 255, 127, 0
+ColorRel = 1, 0.5, 0
+
+[TEST]
+VALUE1 = $" ParseColor( $ColorHex ) "       ; 0.67, 0.804, 0.937
+VALUE2 = $" ParseColor( $ColorHexShort ) "  ; 1.0, 0.53, 0.0
+VALUE3 = $" ParseColor( $ColorRgb ) "       ; 1.0, 0.5, 0.0
+VALUE4 = $" ParseColor( $ColorRel ) "       ; 1.0, 0.5, 0.0
+```
+
+Some common functions could be moved into an external Lua-file, which can be included like this:
+
+```
+[USE: common/functions_base.lua]  ; search is done the same way as for included INI-files
+PRIVATE = 0                       ; again, if set to 1, Lua state will be reset before loading next file
+```
+
 # Known issues and TODOs
 
-- There is no support for vectors or colors in expressions, as well as outputting several values at once. Not entirely sure if it’s solvable at the moment, especially considering that, at least for now, **inipp** app uses Lua 5.3, and **CSP** uses LuaJIT 5.1.
+- There is no support for vectors or colors in expressions. At least they can receive and output tables though.
 
 
