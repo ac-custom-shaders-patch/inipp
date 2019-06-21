@@ -1374,6 +1374,18 @@ namespace utils
 			}
 		}
 
+		static bool is_quote_working(const char* data, const int from, const int to, const bool allow_$)
+		{
+			for (auto i = to - 1; i >= from; i--)
+			{
+				const auto c = data[i];
+				if (is_whitespace(c)) continue;
+				if (allow_$ && c == '$') return is_quote_working(data, from, i, false);
+				return c == ',' && (data[i - 1] != '\\' || data[i - 2] == '\\');
+			}
+			return true;
+		}
+
 		void parse_ini_values(const char* data, const int data_size)
 		{
 			std::vector<current_section_info> cs;
@@ -1447,6 +1459,11 @@ namespace utils
 						{
 							if (end_at == -1)
 							{
+								if (started != -1 && !is_quote_working(data, started, i, true))
+								{
+									goto LAB_DEF;
+								}
+
 								end_at = c;
 								if (started == -1)
 								{
