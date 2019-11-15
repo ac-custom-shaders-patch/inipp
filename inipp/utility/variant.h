@@ -34,28 +34,22 @@ namespace utils
 		}
 
 		template <>
-		variant(const bool& value)
-			: variant(value ? "1" : "0") { }
+		variant(const bool& value) : variant(value ? "1" : "0") { }
 
 		template <>
-		variant(const std::string& value)
-			: values_(1, value) { }
+		variant(const std::string& value) : values_(1, value) { }
 
 		template <>
-		variant(const std::wstring& value)
-			: values_(1, utf16_to_utf8(value)) { }
+		variant(const std::wstring& value) : values_(1, utf16_to_utf8(value)) { }
 
 		template <>
-		variant(std::string value)
-			: values_(1, value) { }
+		variant(std::string value) : values_(1, value) { }
 
 		template <>
-		variant(std::wstring value)
-			: values_(1, utf16_to_utf8(value)) { }
+		variant(std::wstring value) : values_(1, utf16_to_utf8(value)) { }
 
 		template <>
-		variant(std::vector<std::string> values)
-			: values_(std::move(values)) { }
+		variant(std::vector<std::string> values) : values_(std::move(values)) { }
 
 		template <>
 		variant(std::vector<std::wstring> values)
@@ -67,12 +61,10 @@ namespace utils
 		}
 
 		template <class InputIt>
-		variant(InputIt first, InputIt last)
-			: values_(first, last) { }
+		variant(InputIt first, InputIt last) : values_(first, last) { }
 
 		template <>
-		variant(const path& value)
-			: variant(value.string()) { }
+		variant(const path& value) : variant(value.string()) { }
 
 		template <>
 		variant(const std::vector<path>& values)
@@ -107,34 +99,73 @@ namespace utils
 		const std::vector<std::string>& data() const;
 
 		template <typename T>
-		T as(size_t index = 0) const;
-				
-		template <> variant as(size_t i) const
+		T as(size_t i = 0) const
+		{
+			return values_.empty() ? T::deserialize(nullptr, nullptr) : T::deserialize(&values_[i], &values_[0] + values_.size());
+		}
+
+		template <>
+		variant as(size_t i) const
 		{
 			if (i == 0) return *this;
 			return variant(std::vector<std::string>(values_.begin() + i, values_.end()));
 		}
 
-		template <> bool as(size_t i) const { return as_bool(i); }
-		template <> int32_t as(size_t i) const { return int32_t(as_int64_t(i)); }
-		template <> uint32_t as(size_t i) const { return uint32_t(as_uint64_t(i)); }
-		template <> long as(size_t i) const { return long(as_uint64_t(i)); }
-		template <> unsigned long as(size_t i) const { return unsigned long(as_uint64_t(i)); }
-		template <> int64_t as(size_t i) const { return as_int64_t(i); }
-		template <> uint64_t as(size_t i) const { return as_uint64_t(i); }
-		template <> float as(size_t i) const { return float(as_double(i)); }
-		template <> double as(size_t i) const { return as_double(i); }
-		template <> std::string as(size_t i) const { return as_string(i); }
-		template <> std::wstring as(size_t i) const { return as_wstring(i); }
-		template <> path as(size_t i) const { return as_string(i); }
+		template <>
+		bool as(size_t i) const { return as_bool(i); }
 
-#ifndef USE_SIMPLE
-		template <> math::float2 as(size_t i) const { return as_float2(i); }
-		template <> math::float3 as(size_t i) const { return as_float3(i); }
-		template <> math::float4 as(size_t i) const { return as_float4(i); }
-		template <> math::rgb as(size_t i) const { return as_rgbm(i).to_rgb(); }
-		template <> math::rgbm as(size_t i) const { return as_rgbm(i); }
-#endif
+		template <>
+		int32_t as(size_t i) const { return int32_t(as_int64_t(i)); }
+
+		template <>
+		uint32_t as(size_t i) const { return uint32_t(as_uint64_t(i)); }
+
+		template <>
+		long as(size_t i) const { return long(as_uint64_t(i)); }
+
+		template <>
+		unsigned long as(size_t i) const { return unsigned long(as_uint64_t(i)); }
+
+		template <>
+		int64_t as(size_t i) const { return as_int64_t(i); }
+
+		template <>
+		uint64_t as(size_t i) const { return as_uint64_t(i); }
+
+		template <>
+		float as(size_t i) const { return float(as_double(i)); }
+
+		template <>
+		double as(size_t i) const { return as_double(i); }
+
+		template <>
+		std::string as(size_t i) const { return as_string(i); }
+
+		template <>
+		std::wstring as(size_t i) const { return as_wstring(i); }
+
+		template <>
+		path as(size_t i) const { return as_string(i); }
+
+		#ifndef USE_SIMPLE
+		template <>
+		math::uint2 as(size_t i) const { return as_uint2(i); }
+
+		template <>
+		math::float2 as(size_t i) const { return as_float2(i); }
+
+		template <>
+		math::float3 as(size_t i) const { return as_float3(i); }
+
+		template <>
+		math::float4 as(size_t i) const { return as_float4(i); }
+
+		template <>
+		math::rgb as(size_t i) const { return as_rgbm(i).to_rgb(); }
+
+		template <>
+		math::rgbm as(size_t i) const { return as_rgbm(i); }
+		#endif
 
 	private:
 		std::vector<std::string> values_;
@@ -146,11 +177,12 @@ namespace utils
 		const std::string& as_string(size_t i) const;
 		std::wstring as_wstring(size_t i) const;
 
-#ifndef USE_SIMPLE
+		#ifndef USE_SIMPLE
+		math::uint2 as_uint2(size_t i) const;
 		math::float2 as_float2(size_t i) const;
 		math::float3 as_float3(size_t i) const;
 		math::float4 as_float4(size_t i) const;
 		math::rgbm as_rgbm(size_t i) const;
-#endif
+		#endif
 	};
 }

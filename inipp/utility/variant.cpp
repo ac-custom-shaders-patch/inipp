@@ -1,4 +1,4 @@
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "variant.h"
 
 namespace utils
@@ -18,6 +18,15 @@ namespace utils
 	{
 		if (!isdigit(c[0])) return 0.f;
 		return std::strtof(c, nullptr);
+	}
+
+	static uint safe_strtou(const char* c)
+	{
+		if (!isdigit(c[0])) return 0;
+		if (strlen(c) > 2 && c[0] == '0' && c[1] == 'x') {
+			return uint(std::strtoull(c + 2, nullptr, 16));
+		}
+		return uint(std::strtoul(c, nullptr, 10));
 	}
 
 	variant::variant(const std::vector<std::wstring>&& values)
@@ -80,12 +89,26 @@ namespace utils
 		if (i >= values_.size()) return std::wstring();
 		return utf8_to_utf16(values_[i]);
 	}
-	
-#ifndef USE_SIMPLE
+
+	#ifndef USE_SIMPLE
+	math::uint2 variant::as_uint2(size_t i) const
+	{
+		math::uint2 result;
+		for (auto k = 0; k < 2; k++)
+		{
+			result[k] = i + k >= values_.size() ? 0U : safe_strtou(values_[i + k].c_str());
+		}
+		if (values_.size() - i == 1)
+		{
+			result.y = result.x;
+		}
+		return result;
+	}
+
 	math::float2 variant::as_float2(size_t i) const
 	{
 		math::float2 result;
-		for (int k = 0; k < 2; k++)
+		for (auto k = 0; k < 2; k++)
 		{
 			result[k] = i + k >= values_.size() ? 0.0f : safe_strtof(values_[i + k].c_str());
 		}
@@ -99,7 +122,7 @@ namespace utils
 	math::float3 variant::as_float3(size_t i) const
 	{
 		math::float3 result;
-		for (int k = 0; k < 3; k++)
+		for (auto k = 0; k < 3; k++)
 		{
 			result[k] = i + k >= values_.size() ? 0.0f : safe_strtof(values_[i + k].c_str());
 		}
@@ -113,7 +136,7 @@ namespace utils
 	math::float4 variant::as_float4(size_t i) const
 	{
 		math::float4 result;
-		for (int k = 0; k < 4; k++)
+		for (auto k = 0; k < 4; k++)
 		{
 			result[k] = i + k >= values_.size() ? 0.0f : safe_strtof(values_[i + k].c_str());
 		}
@@ -129,7 +152,7 @@ namespace utils
 		math::rgbm result;
 		if ((values_.size() == 1 || values_.size() == 2) && values_[0][0] == '#')
 		{
-			int r, g, b;
+			uint r, g, b;
 			if (sscanf_s(&values_[0][1], "%02x%02x%02x", &r, &g, &b) == 3)
 			{
 				result.rgb.r = float(r) / 255.f;
@@ -145,7 +168,7 @@ namespace utils
 			result.mult = values_.size() == 2 ? safe_strtof(values_[1].c_str()) : 1.f;
 			return result;
 		}
-		for (int k = 0; k < 4; k++)
+		for (auto k = 0; k < 4; k++)
 		{
 			result[k] = i + k >= values_.size() ? 0.0f : safe_strtof(values_[i + k].c_str());
 		}

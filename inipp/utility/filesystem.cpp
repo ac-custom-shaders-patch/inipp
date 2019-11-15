@@ -52,8 +52,8 @@ namespace utils
 		const auto e0 = data_.find_last_of('/');
 		const auto e1 = data_.find_last_of('\\');
 		const auto e = e1 == std::string::npos ? e0
-				: e0 == std::string::npos ? e1
-				: std::max(e0, e1);
+			: e0 == std::string::npos ? e1
+			: std::max(e0, e1);
 		return e == std::string::npos ? path() : data_.substr(0, e);
 	}
 
@@ -62,8 +62,8 @@ namespace utils
 		const auto e0 = data_.find_last_of('/');
 		const auto e1 = data_.find_last_of('\\');
 		const auto e = e1 == std::string::npos ? e0
-				: e0 == std::string::npos ? e1
-				: std::max(e0, e1);
+			: e0 == std::string::npos ? e1
+			: std::max(e0, e1);
 		return e == std::string::npos ? data_ : data_.substr(e + 1);
 
 		// WCHAR buffer[MAX_PATH] = {};
@@ -71,10 +71,24 @@ namespace utils
 		// return utf16_to_utf8(PathFindFileNameW(buffer));
 	}
 
+	template <size_t OUTSIZE>
+	void _utf16_to_utf8(const std::wstring& s, char (&target)[OUTSIZE])
+	{
+		const auto o = utf16_to_utf8(s);
+		std::copy_n(o.begin(), std::min(o.size(), OUTSIZE), target);
+	}
+
+	template <size_t OUTSIZE>
+	void _utf8_to_utf16(const std::string& s, wchar_t (&target)[OUTSIZE])
+	{
+		const auto o = utf8_to_utf16(s);
+		std::copy_n(o.begin(), std::min(o.size(), OUTSIZE), target);
+	}
+
 	path path::filename_without_extension() const
 	{
 		WCHAR buffer[MAX_PATH] = {};
-		utf8_to_utf16(data_, buffer);
+		_utf8_to_utf16(data_, buffer);
 
 		PathRemoveExtensionW(buffer);
 		return utf16_to_utf8(PathFindFileNameW(buffer));
@@ -83,7 +97,7 @@ namespace utils
 	std::string path::extension() const
 	{
 		WCHAR buffer[MAX_PATH] = {};
-		utf8_to_utf16(data_, buffer);
+		_utf8_to_utf16(data_, buffer);
 
 		return utf16_to_utf8(PathFindExtensionW(buffer));
 	}
@@ -91,7 +105,7 @@ namespace utils
 	path& path::replace_extension(const std::string& extension)
 	{
 		WCHAR buffer[MAX_PATH] = {};
-		utf8_to_utf16(data_, buffer);
+		_utf8_to_utf16(data_, buffer);
 
 		PathRenameExtensionW(buffer, utf8_to_utf16(extension).c_str());
 		return operator=(utf16_to_utf8(buffer));
@@ -168,8 +182,8 @@ namespace utils
 
 	static std::unordered_map<special_folder, path> paths;
 	static path default_path(".");
-	
-#ifndef USE_SIMPLE
+
+	#ifndef USE_SIMPLE
 	void set_special_folders_path(const path& ac_root)
 	{
 		WCHAR result[MAX_PATH] = {};
@@ -192,22 +206,32 @@ namespace utils
 		paths[special_folder::ac_screenshots] = path(result) / "Assetto Corsa" / "screens";
 		paths[special_folder::ac_replays] = path(result) / "Assetto Corsa" / "replay";
 		paths[special_folder::ac_replays_temp] = path(result) / "Assetto Corsa" / "replay" / "temp";
+		paths[special_folder::ac_user_setups] = path(result) / "Assetto Corsa" / "setups";
 		paths[special_folder::ac_root] = ac_root;
 
 		paths[special_folder::ac_ppfilters] = ac_root / "system" / "cfg" / "ppfilters";
 		paths[special_folder::ac_content_cars] = ac_root / "content" / "cars";
+		paths[special_folder::ac_content_drivers] = ac_root / "content" / "driver";
 		paths[special_folder::ac_content_tracks] = ac_root / "content" / "tracks";
+		paths[special_folder::ac_content_fonts] = ac_root / "content" / "fonts";
 
 		paths[special_folder::ac_ext] = ac_root / "extension";
 		paths[special_folder::ac_ext_cfg_sys] = ac_root / "extension" / "config";
 		paths[special_folder::ac_ext_cfg_user] = paths[special_folder::ac_cfg] / "extension";
-
-#ifdef DEVELOPMENT_CFG
+		
+		paths[special_folder::ac_ext_textures] = paths[special_folder::ac_ext] / "textures";
+		paths[special_folder::ac_ext_app_icons] = paths[special_folder::ac_ext_textures] / "app_icons";
+		#ifdef DEVELOPMENT_CFG
 		paths[special_folder::ac_ext_shaders] = paths[special_folder::ac_ext] / "shaders";
-#else
+		#else
 		paths[special_folder::ac_ext_shaders] = paths[special_folder::ac_ext] / "shaders_dev";
-#endif
+		#endif
 		paths[special_folder::ac_ext_shaders_pack] = paths[special_folder::ac_ext] / "shaders.zip";
+		paths[special_folder::ac_apps] = ac_root / "apps";
+		paths[special_folder::ac_apps_python] = paths[special_folder::ac_apps] / "python";
+		paths[special_folder::ac_ext_cfg_state] = paths[special_folder::ac_ext_cfg_user] / "state";
+		if (!exists(paths[special_folder::ac_ext_cfg_state])) create_dir(paths[special_folder::ac_ext_cfg_state]);
+		paths[special_folder::ac_results] = path(result) / "Assetto Corsa" / "out";
 	}
 
 	path get_special_folder_path(const special_folder id)
@@ -215,7 +239,7 @@ namespace utils
 		const auto found = paths.find(id);
 		return found != paths.end() ? found->second : default_path;
 	}
-#endif
+	#endif
 
 	std::vector<path> list_files(const path& path_val, const std::string& mask, const bool recursive)
 	{
@@ -269,11 +293,16 @@ namespace utils
 			const auto filename = utf16_to_utf8(ffd.cFileName);
 			if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
 			{
-				if (try_find_file(path_val / filename, file_name, result)) return true;
+				if (try_find_file(path_val / filename, file_name, result))
+				{
+					FindClose(handle);
+					return true;
+				}
 			}
 			else if (_stricmp(filename.c_str(), file_name.c_str()) == 0)
 			{
 				result = path_val / filename;
+				FindClose(handle);
 				return true;
 			}
 		}
@@ -282,8 +311,8 @@ namespace utils
 		FindClose(handle);
 		return false;
 	}
-	
-#ifndef USE_SIMPLE
+
+	#ifndef USE_SIMPLE
 	std::vector<byte> read_file(const path& filename)
 	{
 		if (!exists(filename))
@@ -304,5 +333,5 @@ namespace utils
 		vec.insert(vec.begin(), std::istream_iterator<byte>(file), std::istream_iterator<byte>());
 		return vec;
 	}
-#endif
+	#endif
 }

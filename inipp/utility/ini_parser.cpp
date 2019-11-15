@@ -108,7 +108,7 @@ namespace utils
 	{
 		path file;
 		const ini_parser_error_handler* error_handler{};
-		bool allow_lua;
+		bool allow_lua{};
 	};
 
 	static const std::string SPECIAL_MISSING_VARIABLE = "[[SPEC:MISSING:";
