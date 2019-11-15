@@ -1,5 +1,6 @@
 ﻿#include "stdafx.h"
 #include "string_codecvt.h"
+#include <Windows.h>
 
 const std::string& utf16_to_utf8(const std::string& s)
 {

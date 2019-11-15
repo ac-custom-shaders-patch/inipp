@@ -20,8 +20,6 @@ namespace utils
 	struct ini_parser
 	{
 		using section = std::unordered_map<std::string, variant>;
-		ini_parser(std::unordered_map<std::string, section>& sections);
-		ini_parser(std::unordered_map<std::string, section>& sections, bool allow_includes, const std::vector<path>& resolve_within);
 		ini_parser();
 		ini_parser(bool allow_includes, const std::vector<path>& resolve_within);
 		~ini_parser();

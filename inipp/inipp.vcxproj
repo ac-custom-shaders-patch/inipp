@@ -170,6 +170,7 @@
     <ClCompile Include="utility\alphanum.cpp" />
     <ClCompile Include="utility\filesystem.cpp" />
     <ClCompile Include="utility\ini_parser.cpp" />
+    <ClCompile Include="utility\string_codecvt.cpp" />
     <ClCompile Include="utility\variant.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

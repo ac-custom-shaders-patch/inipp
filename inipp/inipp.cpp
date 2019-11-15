@@ -87,8 +87,11 @@ static std::string serialize(const utils::ini_parser& parser, bool output_format
 
 int main(int argc, const char* argv[])
 {
+#define THROW_STUFF
+#ifndef THROW_STUFF
 	try
 	{
+#endif
 		auto allow_includes = true;
 		auto allow_lua = true;
 		auto quiet = false;
@@ -173,10 +176,12 @@ int main(int argc, const char* argv[])
 		}
 
 		return 0;
+#ifndef THROW_STUFF
 	}
 	catch (std::exception const& e)
 	{
 		std::cerr << e.what() << '\n';
 		return 1;
 	}
+#endif
 }

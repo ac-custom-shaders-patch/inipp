@@ -20,13 +20,13 @@ namespace utils
 		return std::strtof(c, nullptr);
 	}
 
-	static uint safe_strtou(const char* c)
+	static uint32_t safe_strtou(const char* c)
 	{
 		if (!isdigit(c[0])) return 0;
 		if (strlen(c) > 2 && c[0] == '0' && c[1] == 'x') {
-			return uint(std::strtoull(c + 2, nullptr, 16));
+			return uint32_t(std::strtoull(c + 2, nullptr, 16));
 		}
-		return uint(std::strtoul(c, nullptr, 10));
+		return uint32_t(std::strtoul(c, nullptr, 10));
 	}
 
 	variant::variant(const std::vector<std::wstring>&& values)
