@@ -1307,6 +1307,14 @@ namespace utils
 					continue;
 				}
 
+				if (c == '\\' && i < t - 1 && str[i + 1] == '\n')
+				{
+					item += str.substr(last_nonspace, i - last_nonspace);
+					i++;
+					last_nonspace = i + 1;
+					continue;
+				}
+
 				if (c == '"' || c == '\'')
 				{
 					if (q == c)
@@ -1644,6 +1652,7 @@ namespace utils
 					case '\n':
 					{
 						if (end_at != -1) goto LAB_DEF;
+						if (non_space > 0 && data[non_space] == '\\') goto LAB_DEF;
 						parse_ini_finish(cs, data, non_space, key, started, end_at, false, scope);
 						break;
 					}
