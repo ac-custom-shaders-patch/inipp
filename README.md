@@ -1,12 +1,12 @@
 # INIpp
 
-INIpp is an extension for good old INI format, designed specially for Custom Shaders Patch for Assetto Corsa, in attempt to make preparing configs easier. A change there, a tweak here, and it became incompatible with regular parsers, and then things only got worse, to a point where my initial idea of making specialized parsers for Python and JavaScript became a bit unrealistic. Maybe later I’ll get back to it, once format is established, but for now, here is some sort of preprocessor, which is basically just some code parsing those configs withing CSP.
+INIpp is an extension for the good old INI format, designed specially for Custom Shaders Patch for Assetto Corsa, in an attempt to make preparing configs easier. A change there, a tweak here, and it became incompatible with regular parsers, and then things only got worse, to a point where my initial idea of making specialized parsers for Python and JavaScript became a bit unrealistic. Maybe later I’ll get back to it, once format is established, but for now, here is some sort of preprocessor, which is basically just a piece of code from CSP parsing those configs.
 
-In main mode, INIpp outputs data in JSON format, as not all data could be represented with INI (look at “Quotes for specific values” section). There is a flag to change it behavior though.
+In its main mode, INIpp preprocessor prints data in JSON format, since not all data could be represented with INI (look at “Quotes for specific values” section). There is a flag to change it behavior.
 
 # Important note
 
-Please don’t think you need to read any of this in order to work with configs. All of this is mainly meant for standard includable files, in order to make creating actual configs easier. Now, they would look like this:
+Please note, if you’re making configs for CSP, you don’t need to read any of this, especially everything towards the end — those features are mainly for standard includable files, designed to make creating actual configs easier. For example, this thing is made possible with INIpp, and you can use it without overthinking anything (only unusual thing here is that the same section name is used twice, but it’ll unwrap to unique names):
 
 ```ini
 [INCLUDE: common/materials_carpaint.ini]
@@ -16,19 +16,21 @@ CarPaintMaterial = Carpaint
 Skins = ?
 ClearCoatThickness = 0.1
 
+[Material_CarPaint]
+Skins = thick
+ClearCoatThickness = 0.5
+
 [Material_CarPaint_Gold]
 Skins = yellow
 ```
 
-And included file will unwrap it into regular `SHADER_REPLACEMENT_…` mess.
-
 # Features
 
-### Auto-indexing sections
+## Auto-indexing sections
 
-Instead of writing `[SECTION_0]`, `[SECTION_1]`, `[SECTION_2]`, … and painfully keeping track of used indices to avoid conflicts, just use “...” (three dots, not “…”). Parser will automatically find next free index for each section, keeping them in order. You can combine both styles too, to force specific sections to have specific indices if required. No more conflics.
+Instead of writing `[SECTION_0]`, `[SECTION_1]`, `[SECTION_2]`, … and painfully keeping track of used indices to avoid conflicts, just use “...” (or “…”). Parser will automatically find next free index for each section, keeping them in order. You can combine both styles too, to force specific sections to have specific indices if required. No more conflics.
 
-### Setting values to several sections at once
+## Setting values to several sections at once
 
 To reduce copy-paste, here, both sections will get “KEY_SHARED=VALUE” property:
 
@@ -43,7 +45,7 @@ KEY = 1
 KEY_SHARED = VALUE
 ```
 
-### Quotes for specific values
+## Quotes for specific values
 
 With regular INI-files (at least the way they work in Assetto Corsa), it’s impossible to have a multi-line value, or a value with symbols like “[”, “]”, “;”, “,” or “//”. With INIpp, you can wrap values in quotes, either “"” or “'”, and it’ll parse value as it is:
 
@@ -53,9 +55,23 @@ KEY_0 = "value, with; \"all\" [sorts] of=//symbols"
 KEY_1 = \"here, quotes do nothing"
 KEY_2 = as well as "here"
 KEY_3 = and\, this\, is\, a\, single\, value
+KEY_4 = "easy to create
+multiline strings too"
 ```
 
-### Including
+## Multi-line lists
+
+Some of those filters for CSP are long, very long. Quite difficult to work with. Well, not anymore:
+
+```ini
+[GRASS_FX]
+GRASS_MATERIALS = grass, grass_ext, sbancamento, grass_ext_flat, \
+  gras_brd_ext, grs-brd
+```
+
+Use “\” at the end of the line and parser will treat values as if it’s a singe line. But, of course, if there are quotes around it, it’s not going to work.
+
+## Including
 
 One INI-file might reference other files with `[INCLUDE]` sections, like so:
 
@@ -71,13 +87,13 @@ INCLUDE = common/another_shared_file.ini
 
 Included file will be loaded in place of `[INCLUDE]` sections, although with some extra detail (see “Variables”). Important to note: if some property is set twice, second value will be used. So, you can overwrite values in included files with sections coming afterwards.
 
-For shorter version, you can use this syntax:
+For shorter version, use this syntax:
 
 ```ini
 [INCLUDE: common/shared_file.ini]
 ```
 
-### Variables
+## Variables
 
 In order to try and reduce copy-paste, included INI-files can use variables. Their values are set in `[INCLUDE]` sections, and the whole thing looks like this:
 
@@ -99,7 +115,7 @@ KEY = $SomeVariable
 KEY = ${SomeVariable} ; both ways of referring to variable would work
 ```
 
-**Important:** please prefer using CamelCase for variables (and, shown later in docs, templates). CSP, as most other apps, expects values in upper case, so there’ll be less chance of confict.
+**Important:** please prefer using CamelCase for variables (and, shown later in docs, templates). CSP, as most other apps, expects values in upper case, so there’ll be much less chance of confict.
 
 Included files are able to specify default values for variables like so:
 
@@ -164,23 +180,23 @@ LETTERS_WITH_ZEROS = ${SomeVariable}0 ; A0, B0
 LETTERS_AND_LETTERS_IN_BRACKETS = prefix $OtherVariable ; prefix A, prefix B, prefix [A], prefix [B]
 ```
 
-### Skipping
+## Skipping
 
-If needed, you can skip entire sections with `ACTIVE=0`. With this properly found, parser will skip all following properties, while keeping that one. That might be especially helpful with variables:
+If needed, you can skip entire sections with `ACTIVE = 0`. With this properly found, parser will skip all following properties, while keeping that one. That might be especially helpful with variables:
 
 ```ini
 [SHADER_REPLACEMENT_...]
-ACTIVE=$UseSpecificReplacement  ; skip section if variable wasn’t set to 1
-MATERIALS=$SomeMaterialsToTweak
-SHADER=ksPerPixel
+ACTIVE = $UseSpecificReplacement  ; skip section if variable wasn’t set to 1
+MATERIALS = $SomeMaterialsToTweak
+SHADER = ksPerPixel
 
 [SHADER_REPLACEMENT_...]
-ACTIVE=${OtherMaterialsToTweak:count}  ; if materials are not set, whole section will be skipped
-MATERIALS=$OtherMaterialsToTweak
-SHADER=ksPerPixelNM
+ACTIVE = ${OtherMaterialsToTweak:count}  ; if materials are not set, whole section will be skipped
+MATERIALS = $OtherMaterialsToTweak
+SHADER = ksPerPixelNM
 ```
 
-### Templates
+## Templates
 
 With templates, you can create your own type of section which will unwrap into something different. Like so:
 
@@ -259,9 +275,9 @@ SHADER = smCarPaint_old
 SKINS = some_skin
 ```
 
-Isn’t that nice? And consider that in everyday usage, mess that is templates will be hidden in included files.
+Isn’t that nice? And consider that in everyday usage, templates mess will be hidden in included files.
 
-### Mixins
+## Mixins
 
 Mixins are similar to templates, but could be deactivated with a condition, making them helpful in some specific cases. For example, imagine a template receiving either list of meshes or materials, and it needs to set `MESHES = ${Meshes}` or `MATERIALS = ${Materials}`, but with a condition that empty list shouldn’t be set at all (`MESHES=` could mean that thing should be applied to none meshes). With mixins, it’s an easy thing to set:
 
@@ -283,7 +299,7 @@ ACTIVE = $" ${Meshes:count} + ${Materials:count} "
 
 Not only templates, but any section can refer to a mixin. Also, mixins can include other mixins as well. Plus, `extends` keyword allows to build one mixins on top of others similar to templates.
 
-### Expressions
+## Expressions
 
 This one is simple. If you add “$” in front of a string, its value will be calculated, thanks to Lua interpreter:
 
@@ -292,7 +308,7 @@ This one is simple. If you add “$” in front of a string, its value will be c
 SQUARE_ROOT_OF_TWO = $" sqrt(2) "
 ```
 
-On its own, it’s not very helpful, but could be convenient once variables join in:
+On its own, it’s not very helpful, but could be convenient once variables get involved:
 
 ```ini
 [TEMPLATE: Material_CarPaint]
@@ -337,9 +353,9 @@ PROP_1 = fresnelC, 0.08
 PROP_2 = fresnelEXP, 5
 ```
 
-**Important:** variables substitution works differently for expressions. Strings get wrapped in quotes, and if variable is a list, it’ll be passed as a table. Also, of course, if expression returns table, it’ll turn into a list.
+**Important:** variables substitution works differently for expressions. Strings get wrapped in quotes, missing values turn to `nil`, and if variable is a list, it’ll be passed as a table. Also, of course, if expression returns table, it’ll turn into a list.
 
-### Functions
+## Functions
 
 To simplify writing expressions, it’s possible to define functions. Here is an example:
 
@@ -372,12 +388,141 @@ VALUE4 = $" ParseColor( $ColorRel ) "       ; 1.0, 0.5, 0.0
 
 Some common functions could be moved into an external Lua-file, which can be included like this:
 
-```
+```ini
 [USE: common/functions_base.lua]  ; search is done the same way as for included INI-files
 PRIVATE = 0                       ; again, if set to 1, Lua state will be reset before loading next file
 ```
 
-# Known issues and plans
+## Generators
+
+That’s some really messy stuff, but templates can generate more than a single section. Here is a basic example:
+
+```ini
+[TEMPLATE: _SimpleGenerator_0]
+@OUTPUT = SIMPLE_GENERATOR_0
+KEY_0 = $Value
+
+[TEMPLATE: _SimpleGenerator_1]
+@OUTPUT = SIMPLE_GENERATOR_1
+KEY_1 = $" 2 * $Value "
+
+[TEMPLATE: SimpleGenerator]
+Value = 1 ; default value could be set as well
+@GENERATOR = _SimpleGenerator_0
+@GENERATOR = _SimpleGenerator_1
+
+[SimpleGenerator]
+Value = 5
+```
+
+That will generate this:
+
+```ini
+[SIMPLE_GENERATOR_0]
+KEY_0 = 5
+
+[SIMPLE_GENERATOR_1]
+KEY_1 = 10
+```
+
+Same sub-template could be used more than once, and main generating template can pass different parameters to sub-templates:
+
+```ini
+[TEMPLATE: _SimpleGenerator]
+@OUTPUT = SIMPLE_GENERATOR_...
+KEY_0 = $Value
+
+[TEMPLATE: SimpleGenerator]
+@GENERATOR_0 = _SimpleGenerator
+@GENERATOR_0:Value = hello
+@GENERATOR_1 = _SimpleGenerator
+@GENERATOR_1:Value = world
+
+[SimpleGenerator]
+```
+
+Turns to:
+
+```ini
+[SIMPLE_GENERATOR_0]
+KEY_0=hello
+
+[SIMPLE_GENERATOR_1]
+KEY_0=world
+```
+
+For extra special cases, one generator line can spawn multiple sections:
+
+```ini
+[TEMPLATE: _NotSoSimpleGenerator]
+@OUTPUT = SIMPLE_GENERATOR_...
+KEY_0 = $0
+
+[TEMPLATE: NotSoSimpleGenerator]
+@GENERATOR = _NotSoSimpleGenerator, 2
+
+[NotSoSimpleGenerator]
+```
+
+Notice how `$0` turns to the index:
+
+```ini
+[SIMPLE_GENERATOR_0]
+KEY_0=0
+
+[SIMPLE_GENERATOR_1]
+KEY_0=1
+```
+
+And multidimensional case:
+
+```ini
+[TEMPLATE: _NotSoSimpleGenerator]
+@OUTPUT = $" 'SIMPLE_GENERATOR_' .. $0 .. '_' .. $1 .. '_' .. $2 "
+KEY_0 = $0, $1, $2
+
+[TEMPLATE: NotSoSimpleGenerator]
+@GENERATOR = _NotSoSimpleGenerator, 2, 2, 2
+
+[NotSoSimpleGenerator]
+```
+
+```ini
+[SIMPLE_GENERATOR_0_0_0]
+KEY_0=0,0,0
+
+[SIMPLE_GENERATOR_0_0_1]
+KEY_0=0,0,1
+
+[SIMPLE_GENERATOR_0_1_0]
+KEY_0=0,1,0
+
+[SIMPLE_GENERATOR_0_1_1]
+KEY_0=0,1,1
+
+[SIMPLE_GENERATOR_1_0_0]
+KEY_0=1,0,0
+
+[SIMPLE_GENERATOR_1_0_1]
+KEY_0=1,0,1
+
+[SIMPLE_GENERATOR_1_1_0]
+KEY_0=1,1,0
+
+[SIMPLE_GENERATOR_1_1_1]
+KEY_0=1,1,1
+```
+
+## A few extra hardcore tips:
+
+- Single section can implement several templates at once: `[Template1, Template2]`, or: `[EXPLICIT_NAME : Template1, Template2]`;
+- Template can inherit several templates at once: `[TEMPLATE: Template1 EXTENDS Template2, Template3]`;
+- If, when template is used, name is set explicitly, it can be accessed with `$TARGET`;
+- Use expressions when referring to sub-template in generator;
+- Use index variables when setting parameters for sub-templates in generator;
+- When editing configs for CSP, add `[__DEBUG] DUMP_FLATTEN_INI=1` to see what config has unwrapped to (would be saved nearby).
+
+# Plans
 
 - Auto-indexing values might have been a nice addition;
 - There is no support for vectors or colors in expressions. At least they can receive and output tables now;
@@ -385,7 +530,7 @@ PRIVATE = 0                       ; again, if set to 1, Lua state will be reset 
 
 # Credits
 
-- For working with files and values, some code from [Reshade](https://github.com/crosire/reshade) by crosire is used;
-- For sorting, [alphanum.hpp](http://www.davekoelle.com/alphanum.html) by David Koelle;
+- To working with files and values, some code from [Reshade](https://github.com/crosire/reshade) by crosire is used;
+- Alphanumerical sorting thanks to [alphanum.hpp](http://www.davekoelle.com/alphanum.html) by David Koelle;
 - JSON is serialized with [library by Niels Lohmann](https://github.com/nlohmann/json);
 - Expressions are made possible by [Lua](https://www.lua.org/).

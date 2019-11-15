@@ -1,4 +1,7 @@
-﻿#include "stdafx.h"
+﻿// TODO: Use expressions when referring to mixins and other things
+// Generators already use them
+
+#include "stdafx.h"
 #include "ini_parser.h"
 #include "variant.h"
 #include <lua.hpp>
@@ -646,12 +649,11 @@ namespace utils
 		{
 			for (auto c : s)
 			{
-				if (!isdigit(c) && c != '-' && c != '.' && c != '+' && c != 'e' && c != 'E')
-				{
-					s = "\"" + s + "\"";
-					return;
-				}
+				if (!isdigit(c) && c != '-' && c != '.' && c != '+' && c != 'e' && c != 'E') goto Wrap;
 			}
+			return;
+		Wrap:
+			s = "\"" + s + "\"";
 		}
 
 		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, const value_finalizer& dest,
@@ -1081,11 +1083,11 @@ namespace utils
 				}
 				gen_scope->values[param_key] = substitute_variable_array(v0.second, gen_scope, referenced_variables);
 			}
-			parse_ini_section_finish(generated, gen_scope);
+			parse_ini_section_finish(generated, gen_scope, &referenced_variables);
 		}
 
 		void resolve_generator_iteration(const std::shared_ptr<section_template>& t, const std::string& key, const std::string& section_key,
-			const std::shared_ptr<section_template>& tpl, const std::shared_ptr<variable_scope>& scope, std::vector<std::string>& referenced_variables, 
+			const std::shared_ptr<section_template>& tpl, const std::shared_ptr<variable_scope>& scope, std::vector<std::string>& referenced_variables,
 			const std::vector<int>& repeats, size_t repeats_phase)
 		{
 			if (repeats.size() > repeats_phase)
@@ -1096,14 +1098,14 @@ namespace utils
 					gen_scope->values[std::to_string(repeats_phase)] = i;
 					resolve_generator_iteration(t, key, section_key, tpl, gen_scope, referenced_variables, repeats, repeats_phase + 1);
 				}
-			} 
+			}
 			else
 			{
 				resolve_generator_impl(t, key, section_key, tpl, scope, referenced_variables);
 			}
 		}
 
-		void resolve_generator(const std::shared_ptr<section_template>& t, const std::string& key, const variant& trigger, 
+		void resolve_generator(const std::shared_ptr<section_template>& t, const std::string& key, const variant& trigger,
 			const std::shared_ptr<variable_scope>& scope, std::vector<std::string>& referenced_variables)
 		{
 			auto ref_template = trigger.as<std::string>();
@@ -1131,18 +1133,31 @@ namespace utils
 			}
 		}
 
-		void parse_ini_section_finish(current_section_info& c, const std::shared_ptr<variable_scope>& scope)
+		void parse_ini_section_finish(current_section_info& c, const std::shared_ptr<variable_scope>& scope, 
+			std::vector<std::string>* referenced_variables_ptr = nullptr)
 		{
 			if (!c.section_mode()) return;
 
 			if (!c.referenced_templates.empty())
 			{
-				std::vector<std::string> referenced_variables;
+				std::unique_ptr<std::vector<std::string>> referenced_variables_uptr{};
+				if (!referenced_variables_ptr)
+				{
+					referenced_variables_uptr = std::make_unique<std::vector<std::string>>();
+					referenced_variables_ptr = referenced_variables_uptr.get();
+				}
+				auto& referenced_variables = *referenced_variables_ptr;
+
 				for (const auto& t : c.referenced_templates)
 				{
 					auto sc = scope->inherit();
 					sc->fallback(t->scope);
 					sc->extend(t->values);
+					const auto target_found = sc->values.find("TARGET");
+					if (target_found == sc->values.end() && !c.section_key.empty())
+					{
+						sc->values["TARGET"] = c.section_key;
+					}
 					if (!resolve_mixins(sc, t->referenced_mixins, c, referenced_variables, 0))
 					{
 						return;
@@ -1168,6 +1183,7 @@ namespace utils
 						if (is_output)
 						{
 							c.section_key = dest.as<std::string>();
+							sc->values["TARGET"] = c.section_key;
 						}
 						else if (is_generator)
 						{
@@ -1185,19 +1201,6 @@ namespace utils
 							c.target_section[v.first] = dest;
 						}
 					}
-
-					// Resolving generators
-					/*for (const auto& v : t->values)
-					{
-						if (v.first.find("@GENERATOR") == 0)
-						{
-						}
-						else
-						{
-							only_generators = false;
-						}
-					}
-					if (only_generators) return;*/
 				}
 				for (const auto& v : referenced_variables)
 				{
@@ -1380,6 +1383,15 @@ namespace utils
 			return result;
 		}
 
+		void ensure_generator_name_unique(std::string& key, const section& section) const
+		{
+			static auto unique_name = 0;
+			if (key.find("@GENERATOR") == 0 && key.find_first_of(':') == std::string::npos 
+					&& section.find("@GENERATOR") != section.end()) {
+				key ="@GENERATOR_;" + std::to_string(unique_name++);
+			}
+		}
+
 		void parse_ini_finish(current_section_info& c, const std::string& data, const int non_space, std::string& key,
 			int& started, int& end_at, const std::shared_ptr<variable_scope>& scope)
 		{
@@ -1434,6 +1446,7 @@ namespace utils
 			}
 			else if (c.section_mode())
 			{
+				ensure_generator_name_unique(key, c.target_template->values);
 				if (key == "ACTIVE" && !variant(value_splitted).as<bool>())
 				{
 					c.target_section[key] = value_splitted;
@@ -1460,6 +1473,7 @@ namespace utils
 			}
 			else
 			{
+				ensure_generator_name_unique(key, c.target_template->values);
 				(*c.target_template).values[key] = value_splitted;
 			}
 		}
