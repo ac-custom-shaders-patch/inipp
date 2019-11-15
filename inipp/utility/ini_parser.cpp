@@ -888,14 +888,14 @@ namespace utils
 		bool get_template(const std::string& s, std::shared_ptr<section_template>& ref)
 		{
 			ref = templates_map[s];
-			if (!ref) warn("Template is missing: %s", s);
+			if (!ref) error("Template is missing: %s", s);
 			return ref != nullptr;
 		}
 
 		bool get_mixin(const std::string& s, std::shared_ptr<section_template>& ref)
 		{
 			ref = mixins_map[s];
-			if (!ref) warn("Mixin is missing: %s", s);
+			if (!ref) error("Mixin is missing: %s", s);
 			return ref != nullptr;
 		}
 
@@ -909,6 +909,16 @@ namespace utils
 			std::unique_ptr<char[]> buf(new char[ size ]);
 			std::snprintf(buf.get(), size, format, warn_unwrap(args)...);
 			error_handler->on_warning(current_file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
+		}
+
+		template <typename... Args>
+		void error(const char* format, const Args& ... args) const
+		{
+			if (!error_handler) return;
+			const int size = std::snprintf(nullptr, 0, format, warn_unwrap(args)...) + 1; // Extra space for '\0'
+			std::unique_ptr<char[]> buf(new char[ size ]);
+			std::snprintf(buf.get(), size, format, warn_unwrap(args)...);
+			error_handler->on_error(current_file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
 		}
 
 		ini_parser_data(bool allow_includes = false, const std::vector<path>& resolve_within = {})
@@ -1132,12 +1142,12 @@ namespace utils
 				resolve_generator_iteration(t, key, section_key, tpl, scope, referenced_variables, repeats, 0);
 			}
 		}
-
+		
 		void parse_ini_section_finish(current_section_info& c, const std::shared_ptr<variable_scope>& scope, 
 			std::vector<std::string>* referenced_variables_ptr = nullptr)
 		{
 			if (!c.section_mode()) return;
-
+			
 			if (!c.referenced_templates.empty())
 			{
 				std::unique_ptr<std::vector<std::string>> referenced_variables_uptr{};
@@ -1145,25 +1155,30 @@ namespace utils
 				{
 					referenced_variables_uptr = std::make_unique<std::vector<std::string>>();
 					referenced_variables_ptr = referenced_variables_uptr.get();
-				}
+				}  
 				auto& referenced_variables = *referenced_variables_ptr;
+				    
+				auto sc = scope->inherit();
+				sc->extend(c.target_section);
+				for (const auto& t : c.referenced_templates)
+				{
+					sc->fallback(t->scope); 
+					sc->extend(t->values);
+				}
+
+				const auto target_found = sc->values.find("TARGET");
+				if (target_found == sc->values.end() && !c.section_key.empty())
+				{
+					sc->values["TARGET"] = c.section_key;
+				}
 
 				for (const auto& t : c.referenced_templates)
 				{
-					auto sc = scope->inherit();
-					sc->fallback(t->scope);
-					sc->extend(t->values);
-					const auto target_found = sc->values.find("TARGET");
-					if (target_found == sc->values.end() && !c.section_key.empty())
-					{
-						sc->values["TARGET"] = c.section_key;
-					}
 					if (!resolve_mixins(sc, t->referenced_mixins, c, referenced_variables, 0))
 					{
 						return;
 					}
 
-					sc->extend(c.target_section);
 					for (const auto& v : t->values)
 					{
 						const auto is_output = v.first == "@OUTPUT";
@@ -1238,7 +1253,7 @@ namespace utils
 				const auto name = c.target_section["FILE"].as<std::string>();
 				const auto referenced = find_referenced(name, false);
 				if (exists(referenced)) lua_import(referenced, !c.target_section["PRIVATE"].as<bool>(), current_file, error_handler);
-				else warn("Referenced file is missing: %s", name);
+				else error("Referenced file is missing: %s", name);
 				c.target_section.clear();
 			}
 			else if (c.section_key.find("INCLUDE") == 0)
@@ -1562,13 +1577,26 @@ namespace utils
 				{
 					auto pieces = split_string(cs_key, " ", true, true);
 					auto template_name = pieces[0];
-					templates_map[template_name] = std::make_unique<section_template>(template_name, scope);
+					if (templates_map.find(template_name) == templates_map.end())
+					{
+						templates_map[template_name] = std::make_unique<section_template>(template_name, scope);
+					}
+
 					if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
 					{
 						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
 						{
 							trim_self(pieces[k], ", \t\r");
-							templates_map[template_name]->parents.push_back(templates_map[pieces[k]]);
+							const auto found = templates_map.find(pieces[k]);
+							if (found == templates_map.end())
+							{
+								templates_map[pieces[k]] = std::make_unique<section_template>(pieces[k], scope);
+								templates_map[template_name]->parents.push_back(templates_map[pieces[k]]);
+							} 
+							else
+							{
+								templates_map[template_name]->parents.push_back(found->second);
+							}
 						}
 					}
 					cs.push_back(current_section_info{templates_map[template_name]});
@@ -1583,13 +1611,26 @@ namespace utils
 					auto pieces = split_string(cs_key, " ", true, true);
 
 					auto template_name = pieces[0];
-					mixins_map[template_name] = std::make_unique<section_template>(template_name, scope);
+					if (mixins_map.find(template_name) == mixins_map.end())
+					{
+						mixins_map[template_name] = std::make_unique<section_template>(template_name, scope);
+					}
+
 					if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
 					{
 						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
 						{
 							trim_self(pieces[k], ", \t\r");
-							mixins_map[template_name]->parents.push_back(mixins_map[pieces[k]]);
+							const auto found = mixins_map.find(pieces[k]);
+							if (found == mixins_map.end())
+							{
+								mixins_map[pieces[k]] = std::make_unique<section_template>(pieces[k], scope);
+								mixins_map[template_name]->parents.push_back(mixins_map[pieces[k]]);
+							} 
+							else
+							{
+								mixins_map[template_name]->parents.push_back(found->second);
+							}
 						}
 					}
 					cs.push_back(current_section_info{mixins_map[template_name]});
