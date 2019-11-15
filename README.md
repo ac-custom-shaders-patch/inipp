@@ -32,7 +32,7 @@ Instead of writing `[SECTION_0]`, `[SECTION_1]`, `[SECTION_2]`, … and painfull
 
 ## Setting values to several sections at once
 
-To reduce copy-paste, here, both sections will get “KEY_SHARED=VALUE” property:
+To reduce copy-paste, here, both sections will get “KEY_SHARED = VALUE” property:
 
 ```ini
 [SECTION_0]
@@ -279,7 +279,7 @@ Isn’t that nice? And consider that in everyday usage, templates mess will be h
 
 ## Mixins
 
-Mixins are similar to templates, but could be deactivated with a condition, making them helpful in some specific cases. For example, imagine a template receiving either list of meshes or materials, and it needs to set `MESHES = ${Meshes}` or `MATERIALS = ${Materials}`, but with a condition that empty list shouldn’t be set at all (`MESHES=` could mean that thing should be applied to none meshes). With mixins, it’s an easy thing to set:
+Mixins are similar to templates, but could be deactivated with a condition, making them helpful in some specific cases. For example, imagine a template receiving either list of meshes or materials, and it needs to set `MESHES = ${Meshes}` or `MATERIALS = ${Materials}`, but with a condition that empty list shouldn’t be set at all (`MESHES = ` could mean that thing should be applied to none meshes). With mixins, it’s an easy thing to set:
 
 ```ini
 [MIXIN: _MeshesFilter]
@@ -364,7 +364,7 @@ To simplify writing expressions, it’s possible to define functions. Here is an
 [FUNCTION: ParseColor]
 ARGUMENTS = v  ; input arguments to be used in code below
 PRIVATE = 0    ; if set to 1, Lua state will be reset before loading next file
-CODE='
+CODE = '
   if type(v) == "string" and v:sub(1, 1) == "#" then 
     if #v == 7 then return { tonumber(v:sub(2, 3), 16) / 255, tonumber(v:sub(4, 5), 16) / 255, tonumber(v:sub(6, 7), 16) / 255 } end
     if #v == 4 then return { tonumber(v:sub(2, 2), 16) / 15, tonumber(v:sub(3, 3), 16) / 15, tonumber(v:sub(4, 4), 16) / 15 } end
@@ -445,10 +445,10 @@ Turns to:
 
 ```ini
 [SIMPLE_GENERATOR_0]
-KEY_0=hello
+KEY_0 = hello
 
 [SIMPLE_GENERATOR_1]
-KEY_0=world
+KEY_0 = world
 ```
 
 For extra special cases, one generator line can spawn multiple sections:
@@ -468,10 +468,10 @@ Notice how `$0` turns to the index:
 
 ```ini
 [SIMPLE_GENERATOR_0]
-KEY_0=0
+KEY_0 = 0
 
 [SIMPLE_GENERATOR_1]
-KEY_0=1
+KEY_0 = 1
 ```
 
 And multidimensional case:
@@ -489,28 +489,28 @@ KEY_0 = $0, $1, $2
 
 ```ini
 [SIMPLE_GENERATOR_0_0_0]
-KEY_0=0,0,0
+KEY_0 = 0,0,0
 
 [SIMPLE_GENERATOR_0_0_1]
-KEY_0=0,0,1
+KEY_0 = 0,0,1
 
 [SIMPLE_GENERATOR_0_1_0]
-KEY_0=0,1,0
+KEY_0 = 0,1,0
 
 [SIMPLE_GENERATOR_0_1_1]
-KEY_0=0,1,1
+KEY_0 = 0,1,1
 
 [SIMPLE_GENERATOR_1_0_0]
-KEY_0=1,0,0
+KEY_0 = 1,0,0
 
 [SIMPLE_GENERATOR_1_0_1]
-KEY_0=1,0,1
+KEY_0 = 1,0,1
 
 [SIMPLE_GENERATOR_1_1_0]
-KEY_0=1,1,0
+KEY_0 = 1,1,0
 
 [SIMPLE_GENERATOR_1_1_1]
-KEY_0=1,1,1
+KEY_0 = 1,1,1
 ```
 
 ## A few extra hardcore tips:
@@ -520,7 +520,7 @@ KEY_0=1,1,1
 - If, when template is used, name is set explicitly, it can be accessed with `$TARGET`;
 - Use expressions when referring to sub-template in generator;
 - Use index variables when setting parameters for sub-templates in generator;
-- When editing configs for CSP, add `[__DEBUG] DUMP_FLATTEN_INI=1` to see what config has unwrapped to (would be saved nearby).
+- When editing configs for CSP, add `[__DEBUG] DUMP_FLATTEN_INI = 1` to see what config has unwrapped to (would be saved nearby).
 
 # Plans
 
