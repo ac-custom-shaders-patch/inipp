@@ -1752,15 +1752,18 @@ namespace utils
 			for (const auto& p : sections)
 			{
 				auto key = p.first;
-				const auto is_array = key.size() > 4 && key.substr(key.size() - 4) == "_...";
-				if (is_array)
+				if (key.size() > 4)
 				{
-					const auto group = key.substr(0, key.size() - 3);
-					auto& counter = indices[group];
-					key = group + std::to_string(counter++);
-					for (auto i = 0; gen_find(sections, key) != sections.end() && i < 100; i++)
+					const auto postfix = key.substr(key.size() - 4);
+					if (postfix == "_..." || postfix == u8"_…" /* how lucky they are the same size lol */)
 					{
+						const auto group = key.substr(0, key.size() - 3);
+						auto& counter = indices[group];
 						key = group + std::to_string(counter++);
+						for (auto i = 0; gen_find(sections, key) != sections.end() && i < 100; i++)
+						{
+							key = group + std::to_string(counter++);
+						}
 					}
 				}
 
