@@ -656,8 +656,7 @@ namespace utils
 			s = "\"" + s + "\"";
 		}
 
-		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, const value_finalizer& dest,
-			bool expr_mode)
+		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, const value_finalizer& dest, bool expr_mode)
 		{
 			std::vector<std::string> result;
 			if (!get_values(include_vars, result) && !expr_mode)
@@ -1206,13 +1205,6 @@ namespace utils
 						}
 						else if (!is_virtual)
 						{
-							if (v.first == "ACTIVE" && !c.target_section[v.first].as<bool>())
-							{
-								c.target_section.clear();
-								c.target_section["ACTIVE"] = "0";
-								return;
-							}
-
 							c.target_section[v.first] = dest;
 						}
 					}
@@ -1289,6 +1281,13 @@ namespace utils
 
 			if (!c.target_section.empty())
 			{
+				const auto key_active = c.target_section.find("ACTIVE");
+				if (key_active != c.target_section.end() && !key_active->second.as<bool>())
+				{
+					c.target_section = { { "ACTIVE", "0" } };
+					// c.target_section["ACTIVE"] = "0";
+				}
+
 				sections.push_back({c.section_key, c.target_section});
 			}
 		}
@@ -1462,12 +1461,13 @@ namespace utils
 			else if (c.section_mode())
 			{
 				ensure_generator_name_unique(key, c.target_template->values);
-				if (key == "ACTIVE" && !variant(value_splitted).as<bool>())
+				/*if (key == "ACTIVE" && !variant(value_splitted).as<bool>())
 				{
 					c.target_section[key] = value_splitted;
 					c.terminate();
 				}
-				else if (c.section_key == "DEFAULTS")
+				else*/ 
+				if (c.section_key == "DEFAULTS")
 				{
 					const auto compatible_mode = key.find("VAR") == 0 && !value_splitted.empty();
 					const auto& actual_key = compatible_mode ? value_splitted[0] : key;
