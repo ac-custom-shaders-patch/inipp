@@ -73,13 +73,13 @@ struct error_handler : utils::ini_parser_error_handler
 	void on_error(const utils::path& filename, const char* message) const override
 	{
 		if (quiet) return;
-		std::cerr << "Error in `" << filename.filename() << "`: " << message << '\n';
+		std::cerr << "Error in " << filename.filename() << ": " << message << '\n';
 	}
 
 	void on_warning(const utils::path& filename, const char* message) const override
 	{
 		if (quiet) return;
-		std::cerr << "Error in `" << filename.filename() << "`: " << message << '\n';
+		std::cerr << "Error in " << filename.filename() << ": " << message << '\n';
 	}
 };
 
@@ -100,6 +100,9 @@ void do_debug_run()
 {
     SetConsoleOutputCP(65001);
 	const auto handler = error_handler(false, true);
+	auto clear = true;
+	std::cout << u8"[s";
+
 	for (const auto& entry : std::experimental::filesystem::directory_iterator("auto"))
 	{
 		if (entry.path().extension() == ".ini" && entry.path().native().find(L"__") == std::wstring::npos)
@@ -119,12 +122,14 @@ void do_debug_run()
 				}
 				else
 				{
+					clear = false;
 					std::cout << STYLE_ERROR u8"failed ⚠" STYLE_RESET << std::endl;
 					std::cout << data;
 				}
 			} 
 			else
 			{
+				clear = false;
 				std::cout << STYLE_INFO u8"new result ✳" STYLE_RESET << std::endl;
 				std::ofstream(required.wstring()) << data;
 			}
@@ -134,6 +139,7 @@ void do_debug_run()
 	const utils::path dev_input("dev/dev.ini");
 	if (exists(dev_input))
 	{
+		if (clear) std::cout << u8"[2J[u";
 		std::cout << STYLE_QUEUE u8"• Running developing input:" STYLE_RESET << std::endl;
 		std::cout << utils::ini_parser(true, {}).allow_lua(true).parse_file(dev_input, simple_reader(), handler).finalize().to_ini();
 	}

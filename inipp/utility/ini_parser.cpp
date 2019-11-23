@@ -16,7 +16,27 @@
 
 namespace utils
 {
-	using section = std::unordered_map<std::string, variant>;
+	using resulting_section = std::unordered_map<std::string, variant>;
+	using creating_section = std::map<std::string, variant>;
+	using template_section = std::vector<std::pair<std::string, variant>>;
+
+	template <typename TValue>
+	auto gen_find(const std::vector<std::pair<std::string, TValue>>& l, const std::string& a)
+	{
+		return std::find_if(l.begin(), l.end(), [=](const std::pair<std::string, TValue>& s) { return s.first == a; });
+	}
+
+	template <typename TValue>
+	auto gen_find(const std::map<std::string, TValue>& l, const std::string& a)
+	{
+		return l.find(a);
+	}
+
+	template <typename TValue>
+	auto gen_find(const std::unordered_map<std::string, TValue>& l, const std::string& a)
+	{
+		return l.find(a);
+	}
 
 	static bool is_space(char c)
 	{
@@ -84,7 +104,7 @@ namespace utils
 		return true;
 	}
 
-	static bool sort_sections(const std::pair<std::string, section>& a, const std::pair<std::string, section>& b)
+	static bool sort_sections(const std::pair<std::string, resulting_section>& a, const std::pair<std::string, resulting_section>& b)
 	{
 		return doj::alphanum_comp(a.first, b.first) < 0;
 	}
@@ -96,99 +116,93 @@ namespace utils
 
 	struct variable_scope : std::enable_shared_from_this<variable_scope>
 	{
-		section values;
-		std::vector<const section*> local_extensions;
+		creating_section explicit_values;
+		creating_section default_values;
+		const creating_section* target_section;
 		std::vector<const variable_scope*> local_fallbacks;
 		std::shared_ptr<variable_scope> parent;
-
-		void extend(const section& s)
-		{
-			local_extensions.push_back(&s);
-		}
 
 		void fallback(const std::shared_ptr<variable_scope>& s)
 		{
 			local_fallbacks.push_back(s.get());
 		}
 
-		std::shared_ptr<variable_scope> inherit()
+		std::shared_ptr<variable_scope> inherit(const creating_section* target_section = nullptr)
 		{
-			return std::make_shared<variable_scope>(shared_from_this());
+			return std::make_shared<variable_scope>(shared_from_this(), target_section);
 		}
+
+		variable_scope() : target_section(nullptr), parent(nullptr) {}
+		variable_scope(const std::shared_ptr<variable_scope>& parent, const creating_section* target_section) : target_section(target_section), parent(parent) {}
 
 		const variant* find(const std::string& name) const
 		{
-			for (const auto& s : local_extensions)
-			{
-				const auto v = s->find(name);
-				if (v != s->end())
-				{
-					return &v->second;
-				}
-			}
+			if (const auto ret = find_explicit(name)) return ret;
+			if (const auto ret = find_value(name)) return ret;
+			if (const auto ret = find_fallback(name)) return ret;
+			return nullptr;
+		}
 
-			const auto v = values.find(name);
-			if (v != values.end())
+	private:
+		const variant* find_explicit(const std::string& name) const
+		{
+			const auto v = explicit_values.find(name);
+			if (v != explicit_values.end())
 			{
 				return &v->second;
 			}
 
-			if (const auto ret = parent ? parent->find(name) : nullptr) return ret;
-			for (auto f : local_fallbacks)
+			if (const auto ret = parent ? parent->find_explicit(name) : nullptr)
 			{
-				if (const auto ret = f->find(name)) return ret;
+				return ret;
 			}
 
 			return nullptr;
 		}
 
-		//private:
-		variable_scope() : parent(nullptr) {}
-		variable_scope(const std::shared_ptr<variable_scope>& parent) : parent(parent) {}
-
-		/*template <typename... Args>
-		void extend(const section& s, Args&& ...args)
+		const variant* find_value(const std::string& name) const
 		{
-			scopes.push_back(&s);
-			extend(args);
-		}*/
-
-		/*void bake(section& target) const
-		{
-			for (const auto& s : scopes)
+			if (target_section != nullptr)
 			{
-				for (const auto& p : *s)
+				const auto v = target_section->find(name);
+				if (v != target_section->end())
 				{
-					if (target.find(p.first) != target.end()) continue;
-					target[p.first] = p.second;
+					return &v->second;
 				}
 			}
 
-			if (parent) parent->bake(target);
-			if (fallback) fallback->bake(target);
-		}*/
-	};
+			if (const auto ret = parent ? parent->find_value(name) : nullptr)
+			{
+				return ret;
+			}
 
-	/*struct variable_scope_baked
-	{
-		// In general it seems like a good idea for variable_scope to operate with pointers. Apart from everything,
-		// it allows to add neat inheritance system. There is a problem though: templates should hold variables 
-		// of their files in their scopes, and they could be used outside of their files, and after files with their scopes 
-		// are long gone. Solution: bake scopes for templates when those are created, copying everything within templates.
-		// Not a nice solution, and I believe it could be done more optimally with std::shared_ptr, but at the moment I
-		// really don’t want to go into all of those std::enable_shared_from_this stuff. I like when ownership of data is
-		// clear.
-
-		section flatten;
-		variable_scope holding_scope;
-
-		variable_scope_baked() : holding_scope(nullptr){}
-		variable_scope_baked(const variable_scope& scope) : holding_scope(nullptr)
-		{
-			scope.bake(flatten);
-			holding_scope.extend(flatten);
+			return nullptr;
 		}
-	};*/
+
+		const variant* find_fallback(const std::string& name) const
+		{
+			if (const auto ret = parent ? parent->find_fallback(name) : nullptr)
+			{
+				return ret;
+			}
+
+			const auto v = default_values.find(name);
+			if (v != default_values.end())
+			{
+				return &v->second;
+			}
+
+			for (auto f : local_fallbacks)
+			{
+				if (const auto ret = f->find(name))
+				{
+					return ret;
+				}
+			}
+
+			return nullptr;
+		}
+	};
 
 	struct script_params
 	{
@@ -196,7 +210,7 @@ namespace utils
 		const ini_parser_error_handler* error_handler{};
 		bool allow_lua{};
 	};
-	
+
 	static const uint32_t SPECIAL_AUTOINCREMENT_LIMIT = 10000;
 	static const std::string SPECIAL_KEY_AUTOINCREMENT = "[[SPEC:INC]]";
 	static const std::string SPECIAL_MISSING_VARIABLE = "[[SPEC:MISSING:";
@@ -641,7 +655,7 @@ namespace utils
 			{
 				dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
 			}
-			else if (dest.params.error_handler)
+			else if (dest.params.error_handler && (name.empty() || !isdigit(name[0])))
 			{
 				dest.params.error_handler->on_warning(dest.params.file, ("Missing variable: " + name).c_str());
 			}
@@ -828,12 +842,10 @@ namespace utils
 
 	struct section_template
 	{
-		// std::string result_name;
 		std::string name;
-		section values;
+		template_section values;
 		std::shared_ptr<variable_scope> scope;
 		std::vector<std::shared_ptr<section_template>> parents;
-		std::vector<std::shared_ptr<section_template>> referenced_mixins;
 
 		section_template(const std::string& name, const std::shared_ptr<variable_scope>& scope)
 			: name(name), scope(scope->inherit())
@@ -844,30 +856,27 @@ namespace utils
 	{
 		bool terminated{};
 		std::string section_key;
-		section target_section{};
+		creating_section target_section{};
 		std::shared_ptr<section_template> target_template{};
 		std::vector<std::shared_ptr<section_template>> referenced_templates;
-		std::vector<std::shared_ptr<section_template>> referenced_section_mixins;
+		std::vector<std::string> referenced_variables;
 
-		explicit current_section_info(std::shared_ptr<section_template> target_template)
+		explicit current_section_info(const std::shared_ptr<section_template>& target_template)
 			: target_template(target_template) { }
 
 		current_section_info(const std::string& key)
 			: section_key(key) { }
 
-		current_section_info(const std::string& key, std::vector<std::shared_ptr<section_template>> templates)
+		current_section_info(const std::string& key, const std::vector<std::shared_ptr<section_template>>& templates)
 			: section_key(key), referenced_templates(templates) { }
 
 		bool section_mode() const { return target_template == nullptr && !terminated; }
 		void terminate() { terminated = true; }
 	};
 
-	using section_named = std::pair<std::string, section>;
+	using section_named = std::pair<std::string, creating_section>;
 	using sections_list = std::vector<section_named>;
-	using sections_map = std::unordered_map<std::string, section>;
-
-	auto gen_find(const sections_list& l, const std::string& a) { return std::find_if(l.begin(), l.end(), [=](const section_named& s) { return s.first == a; }); }
-	auto gen_find(const sections_map& l, const std::string& a) { return l.find(a); }
+	using sections_map = std::unordered_map<std::string, resulting_section>;
 
 	struct ini_parser_data
 	{
@@ -948,7 +957,7 @@ namespace utils
 			processed_files.push_back(name);
 		}
 
-		static size_t vars_fingerprint(const section& vars)
+		static size_t vars_fingerprint(const creating_section& vars)
 		{
 			size_t ret{};
 			for (const auto& p : vars)
@@ -1006,56 +1015,6 @@ namespace utils
 			return {dest, params, true};
 		}
 
-		bool resolve_mixins(const std::shared_ptr<variable_scope>& sc_par, const std::vector<std::shared_ptr<section_template>>& mixins,
-			current_section_info& c, std::vector<std::string>& referenced_variables, int scope) const
-		{
-			if (scope > 10) return true;
-			for (const auto& m : mixins)
-			{
-				auto sc = sc_par->inherit();
-				sc->extend(c.target_section);
-				sc->extend(m->values);
-				sc->fallback(m->scope);
-
-				// auto scope = sc->inherit();
-				auto m_active = m->values.find("@ACTIVE");
-				if (m_active != m->values.end())
-				{
-					variant m_active_v;
-					for (const auto& piece : m_active->second.data())
-					{
-						substitute_variable(piece, sc, get_value_finalizer(m_active_v.data()), 0, &referenced_variables);
-					}
-					if (!m_active_v.as<bool>()) goto NextMixin_1;
-				}
-
-				for (const auto& v : m->values)
-				{
-					if (v.first == "@ACTIVE") continue;
-					if (c.target_section.find(v.first) != c.target_section.end()) continue;
-					auto& dest = c.target_section[convert_key_autoinc(v.first)].data();
-					for (const auto& piece : v.second.data())
-					{
-						substitute_variable(piece, sc, get_value_finalizer(dest), 0, &referenced_variables);
-					}
-					if (v.first == "ACTIVE" && !c.target_section[v.first].as<bool>())
-					{
-						c.target_section.clear();
-						c.target_section["ACTIVE"] = "0";
-						return false;
-					}
-				}
-
-				if (!resolve_mixins(sc, m->referenced_mixins, c, referenced_variables, scope + 1))
-				{
-					return false;
-				}
-
-			NextMixin_1: {}
-			}
-			return true;
-		}
-
 		variant substitute_variable_array(const variant& v, const std::shared_ptr<variable_scope>& sc, std::vector<std::string>& referenced_variables) const
 		{
 			variant dest;
@@ -1072,27 +1031,30 @@ namespace utils
 			current_section_info generated(section_key, {tpl});
 			auto gen_scope = scope;
 			auto gen_param_prefix = key + ":";
-			for (const auto& v0 : t->values)
+			if (t)
 			{
-				if (v0.first.find(key) != 0) continue;
-				const auto v0_sep = v0.first.find_first_of(':');
-				if (v0_sep == std::string::npos) continue;
-				auto is_param = true;
-				for (auto j = key.size(); j < v0_sep; j++)
+				for (const auto& v0 : t->values)
 				{
-					if (!is_space(v0.first[j]))
+					if (v0.first.find(key) != 0) continue;
+					const auto v0_sep = v0.first.find_first_of(':');
+					if (v0_sep == std::string::npos) continue;
+					auto is_param = true;
+					for (auto j = key.size(); j < v0_sep; j++)
 					{
-						is_param = false;
+						if (!is_space(v0.first[j]))
+						{
+							is_param = false;
+						}
 					}
+					if (!is_param) continue;
+					auto param_key = v0.first.substr(v0_sep + 1);
+					trim_self(param_key);
+					if (gen_scope == scope)
+					{
+						gen_scope = scope->inherit();
+					}
+					gen_scope->explicit_values[param_key] = substitute_variable_array(v0.second, gen_scope, referenced_variables);
 				}
-				if (!is_param) continue;
-				auto param_key = v0.first.substr(v0_sep + 1);
-				trim_self(param_key);
-				if (gen_scope == scope)
-				{
-					gen_scope = scope->inherit();
-				}
-				gen_scope->values[param_key] = substitute_variable_array(v0.second, gen_scope, referenced_variables);
 			}
 			parse_ini_section_finish(generated, gen_scope, &referenced_variables);
 		}
@@ -1106,7 +1068,7 @@ namespace utils
 				for (auto i = 0, n = repeats_phase >= repeats.size() ? 1 : repeats[repeats_phase]; i < n; i++)
 				{
 					auto gen_scope = scope->inherit();
-					gen_scope->values[std::to_string(repeats_phase)] = i;
+					gen_scope->explicit_values[std::to_string(repeats_phase)] = i;
 					resolve_generator_iteration(t, key, section_key, tpl, gen_scope, referenced_variables, repeats, repeats_phase + 1);
 				}
 			}
@@ -1116,15 +1078,45 @@ namespace utils
 			}
 		}
 
+		void set_inline_values(std::shared_ptr<variable_scope>& scope_own, const std::shared_ptr<variable_scope>& scope, 
+			const variant& trigger, const int index, std::vector<std::string>& referenced_variables)
+		{
+			for (auto i = index; i < int(trigger.data().size()); i++)
+			{
+				const auto& item = trigger.data()[i];
+				const auto set = item.find_first_of('=');
+				if (set != std::string::npos)
+				{
+					if (!scope_own)
+					{
+						scope_own = scope->inherit();
+					}
+
+					auto set_key = item.substr(0, set);
+					auto set_value = item.substr(set + 1);
+					trim_self(set_key);
+					trim_self(set_value);
+					scope_own->explicit_values[set_key] = split_and_substitute(nullptr, set_value, scope_own, &referenced_variables);
+					continue;
+				}
+			}
+		}
+
 		void resolve_generator(const std::shared_ptr<section_template>& t, const std::string& key, const variant& trigger,
 			const std::shared_ptr<variable_scope>& scope, std::vector<std::string>& referenced_variables)
 		{
 			auto ref_template = trigger.as<std::string>();
 
+			std::shared_ptr<variable_scope> scope_own;
+			set_inline_values(scope_own, scope, trigger, 1, referenced_variables);
+
 			std::vector<int> repeats;
 			for (auto i = 1; i < int(trigger.data().size()); i++)
 			{
-				repeats.push_back(trigger.as<int>(i));
+				if (trigger.data()[i].find_first_of('=') == std::string::npos)
+				{
+					repeats.push_back(trigger.as<int>(i));
+				}
 			}
 
 			std::string section_key;
@@ -1140,76 +1132,113 @@ namespace utils
 			std::shared_ptr<section_template> tpl;
 			if (get_template(ref_template, tpl))
 			{
-				resolve_generator_iteration(t, key, section_key, tpl, scope, referenced_variables, repeats, 0);
+				resolve_generator_iteration(t, key, section_key, tpl, scope_own ? scope_own : scope, referenced_variables, repeats, 0);
 			}
 		}
-		
-		void parse_ini_section_finish(current_section_info& c, const std::shared_ptr<variable_scope>& scope, 
+
+		static std::shared_ptr<variable_scope> prepare_section_scope(current_section_info& c, const std::shared_ptr<variable_scope>& scope)
+		{
+			auto sc = scope->inherit(&c.target_section);
+			for (const auto& t : c.referenced_templates)
+			{
+				sc->fallback(t->scope);
+			}
+
+			const auto target_found = sc->explicit_values.find("TARGET");
+			if (target_found == sc->explicit_values.end() && !c.section_key.empty())
+			{
+				sc->explicit_values["TARGET"] = c.section_key;
+			}
+			return sc;
+		}
+
+		void resolve_template(current_section_info& c, const std::shared_ptr<variable_scope>& scope, const std::shared_ptr<section_template>& t,
+			std::vector<std::string>& referenced_variables)
+		{
+			const auto sc = scope->inherit();
+			sc->fallback(t->scope);
+
+			const auto inactive = gen_find(t->values, "@ACTIVE");
+			if (inactive != t->values.end())
+			{
+				const auto dest = substitute_variable_array(inactive->second, sc, referenced_variables);
+				if (!dest.as<bool>()) return;
+			}
+
+			// This would allow to overwrite values by template
+			std::vector<std::string> set_via_template;
+
+			for (const auto& v : t->values)
+			{
+				if (v.first.find("@ACTIVE") == 0) continue;
+
+				const auto is_output = v.first == "@OUTPUT";
+				if (is_output && !c.section_key.empty()) continue;
+
+				const auto is_generator = v.first.find("@GENERATOR") == 0;
+				const auto is_generator_param = is_generator && v.first.find_first_of(':') != std::string::npos;
+				const auto is_mixin = v.first.find("@MIXIN") == 0;
+				const auto is_virtual = is_output || is_generator || is_mixin;
+
+				if (!is_virtual && c.target_section.find(v.first) != c.target_section.end()
+					&& std::find(set_via_template.begin(), set_via_template.end(), v.first) == set_via_template.end()
+					|| is_generator_param)
+				{
+					continue;
+				}
+
+				auto dest = substitute_variable_array(v.second, sc, referenced_variables);
+				if (is_output)
+				{
+					c.section_key = dest.as<std::string>();
+					sc->explicit_values["TARGET"] = c.section_key;
+				}
+				else if (is_generator)
+				{
+					resolve_generator(t, v.first, dest, sc, referenced_variables);
+				}
+				else if (is_mixin)
+				{
+					resolve_mixin(c, sc, dest.data());
+				}
+				else if (!is_virtual)
+				{
+					const auto key = convert_key_autoinc(v.first);
+					c.target_section[key] = dest;
+					set_via_template.push_back(key);
+				}
+			}
+		}
+
+		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const std::vector<std::string>& trigger)
+		{
+			std::shared_ptr<section_template> t;
+			if (trigger.empty() || !get_mixin(trigger[0], t)) return;
+
+			std::shared_ptr<variable_scope> scope_own;
+			set_inline_values(scope_own, sc, trigger, 1, c.referenced_variables);
+			resolve_template(c, scope_own ? scope_own : sc, t, c.referenced_variables);
+		}
+
+		void parse_ini_section_finish(current_section_info& c, const std::shared_ptr<variable_scope>& scope,
 			std::vector<std::string>* referenced_variables_ptr = nullptr)
 		{
 			if (!c.section_mode()) return;
-			
+
 			if (!c.referenced_templates.empty())
 			{
-				std::unique_ptr<std::vector<std::string>> referenced_variables_uptr{};
+				std::unique_ptr<std::vector<std::string>> referenced_variables_uptr;
 				if (!referenced_variables_ptr)
 				{
-					referenced_variables_uptr = std::make_unique<std::vector<std::string>>();
+					referenced_variables_uptr = std::make_unique<std::vector<std::string>>(c.referenced_variables);
 					referenced_variables_ptr = referenced_variables_uptr.get();
-				}  
+				}
 				auto& referenced_variables = *referenced_variables_ptr;
-				    
-				auto sc = scope->inherit();
-				sc->extend(c.target_section);
+
+				const auto sc = prepare_section_scope(c, scope);
 				for (const auto& t : c.referenced_templates)
 				{
-					sc->fallback(t->scope); 
-					sc->extend(t->values);
-				}
-
-				const auto target_found = sc->values.find("TARGET");
-				if (target_found == sc->values.end() && !c.section_key.empty())
-				{
-					sc->values["TARGET"] = c.section_key;
-				}
-
-				for (const auto& t : c.referenced_templates)
-				{
-					if (!resolve_mixins(sc, t->referenced_mixins, c, referenced_variables, 0))
-					{
-						return;
-					}
-
-					for (const auto& v : t->values)
-					{
-						const auto is_output = v.first == "@OUTPUT";
-						if (is_output && !c.section_key.empty()) continue;
-
-						const auto is_generator = v.first.find("@GENERATOR") == 0;
-						const auto is_generator_param = is_generator && v.first.find_first_of(':') != std::string::npos;
-						const auto is_virtual = is_output || is_generator;
-
-						if (!is_virtual && c.target_section.find(v.first) != c.target_section.end()
-							|| is_generator_param)
-						{
-							continue;
-						}
-
-						auto dest = substitute_variable_array(v.second, sc, referenced_variables);
-						if (is_output)
-						{
-							c.section_key = dest.as<std::string>();
-							sc->values["TARGET"] = c.section_key;
-						}
-						else if (is_generator)
-						{
-							resolve_generator(t, v.first, dest, sc, referenced_variables);
-						}
-						else if (!is_virtual)
-						{
-							c.target_section[convert_key_autoinc(v.first)] = dest;
-						}
-					}
+					resolve_template(c, sc, t, referenced_variables);
 				}
 				for (const auto& v : referenced_variables)
 				{
@@ -1217,19 +1246,9 @@ namespace utils
 				}
 			}
 
+			for (const auto& v : c.referenced_variables)
 			{
-				std::vector<std::string> referenced_variables;
-				auto sc = scope->inherit();
-				sc->extend(c.target_section);
-				// TODO: Scopes
-				if (!resolve_mixins(sc, c.referenced_section_mixins, c, referenced_variables, 0))
-				{
-					return;
-				}
-				for (const auto& v : referenced_variables)
-				{
-					c.target_section.erase(v);
-				}
+				c.target_section.erase(v);
 			}
 
 			if (c.section_key == "FUNCTION")
@@ -1261,8 +1280,8 @@ namespace utils
 					for (const auto& p : c.target_section)
 					{
 						if (p.first == "INCLUDE") continue;
-						if (p.first.find("VAR") == 0) include_scope->values[p.second.as<std::string>()] = p.second.as<variant>(1);
-						else include_scope->values[p.first] = p.second;
+						if (p.first.find("VAR") == 0) include_scope->default_values[p.second.as<std::string>()] = p.second.as<variant>(1);
+						else include_scope->default_values[p.first] = p.second;
 					}
 
 					// It’s important to copy values and clear section before parsing included files: those
@@ -1270,7 +1289,7 @@ namespace utils
 					auto values = to_include->second.data();
 					c.target_section.clear();
 
-					auto vars_fp = vars_fingerprint(include_scope->values);
+					const auto vars_fp = vars_fingerprint(include_scope->default_values);
 					for (auto& i : values)
 					{
 						parse_file(find_referenced(i, vars_fp), include_scope, vars_fp);
@@ -1286,7 +1305,7 @@ namespace utils
 				const auto key_active = c.target_section.find("ACTIVE");
 				if (key_active != c.target_section.end() && !key_active->second.as<bool>())
 				{
-					c.target_section = { { "ACTIVE", "0" } };
+					c.target_section = {{"ACTIVE", "0"}};
 					// c.target_section["ACTIVE"] = "0";
 				}
 
@@ -1299,7 +1318,7 @@ namespace utils
 			return c == ' ' || c == '\t' || c == '\r';
 		}
 
-		static std::vector<std::string> split_string_quotes(std::string& str)
+		static std::vector<std::string> split_string_quotes(const std::string& str)
 		{
 			std::vector<std::string> result;
 
@@ -1399,15 +1418,6 @@ namespace utils
 			return result;
 		}
 
-		void ensure_generator_name_unique(std::string& key, const section& section) const
-		{
-			static auto unique_name = 0;
-			if (key.find("@GENERATOR") == 0 && key.find_first_of(':') == std::string::npos 
-					&& section.find("@GENERATOR") != section.end()) {
-				key ="@GENERATOR_;" + std::to_string(unique_name++);
-			}
-		}
-
 		static std::string convert_key_autoinc(const std::string& key)
 		{
 			std::string group_us;
@@ -1415,11 +1425,30 @@ namespace utils
 			{
 				static uint64_t index = 0;
 				return group_us + SPECIAL_KEY_AUTOINCREMENT + std::to_string(index++);
-			} 
-			else 
+			}
+			else
 			{
 				return key;
 			}
+		}
+
+		std::vector<std::string> split_and_substitute(current_section_info* c, const std::string& value, const std::shared_ptr<variable_scope>& sc,
+			std::vector<std::string>* referenced_variables) const
+		{
+			std::vector<std::string> value_splitted;
+			for (const auto& value_piece : split_string_quotes(value))
+			{
+				if (c && (c->section_key == "DEFAULTS" || c->section_key == "INCLUDE" || c->target_template))
+				{
+					value_splitted.push_back(value_piece);
+				}
+				else
+				{
+					substitute_variable(value_piece, sc, get_value_finalizer(value_splitted), 0, 
+						referenced_variables ? referenced_variables : c ? &c->referenced_variables : nullptr);
+				}
+			}
+			return value_splitted;
 		}
 
 		void parse_ini_finish(current_section_info& c, const std::string& data, const int non_space, std::string& key,
@@ -1439,73 +1468,45 @@ namespace utils
 				value = "";
 			}
 
+			const auto sc = prepare_section_scope(c, scope);
 			const auto new_key = allow_override || !c.referenced_templates.empty() || (c.section_mode()
 				? c.target_section.find(key) == c.target_section.end()
-				: (*c.target_template).values.find(key) == (*c.target_template).values.end());
+				: gen_find((*c.target_template).values, key) == (*c.target_template).values.end());
+			const auto splitted = split_and_substitute(&c, value, sc, &c.referenced_variables);
 
-			std::vector<std::string> value_splitted;
-			for (const auto& value_piece : split_string_quotes(value))
+			if (c.section_mode())
 			{
-				if (c.section_key == "DEFAULTS" || c.section_key == "INCLUDE" || c.target_template)
+				if (key.find("@MIXIN") == 0)
 				{
-					value_splitted.push_back(value_piece);
+					resolve_mixin(c, sc, splitted);
 				}
-				else
+				else if (key.find("@GENERATOR") == 0)
 				{
-					auto sc = scope;
-					if (!c.referenced_templates.empty())
-					{
-						sc = sc->inherit();
-						sc->extend(c.target_section);
-						for (const auto& r : c.referenced_templates)
-						{
-							sc->extend(r->values);
-							sc->fallback(r->scope);
-						}
-					}
-					substitute_variable(value_piece, sc, get_value_finalizer(value_splitted), 0, nullptr);
+					resolve_generator(nullptr, "", splitted, sc, c.referenced_variables);
 				}
-			}
-
-			if (key.find("@MIXIN") == 0)
-			{
-				std::shared_ptr<section_template> tpl;
-				if (!get_mixin(value_splitted[0], tpl)) return;
-				if (c.section_mode()) c.referenced_section_mixins.push_back(tpl);
-				else c.target_template->referenced_mixins.push_back(tpl);
-			}
-			else if (c.section_mode())
-			{
-				ensure_generator_name_unique(key, c.target_template->values);
-				/*if (key == "ACTIVE" && !variant(value_splitted).as<bool>())
+				else if (c.section_key == "DEFAULTS")
 				{
-					c.target_section[key] = value_splitted;
-					c.terminate();
-				}
-				else*/ 
-				if (c.section_key == "DEFAULTS")
-				{
-					const auto compatible_mode = key.find("VAR") == 0 && !value_splitted.empty();
-					const auto& actual_key = compatible_mode ? value_splitted[0] : key;
-					scope->values[actual_key] = compatible_mode ? variant(value_splitted).as<variant>(1) : value_splitted;
-				}
-				else if (new_key)
-				{
-					c.target_section[convert_key_autoinc(key)] = value_splitted;
+					const auto compatible_mode = key.find("VAR") == 0 && !splitted.empty();
+					const auto& actual_key = compatible_mode ? splitted[0] : key;
+					scope->default_values[actual_key] = compatible_mode ? variant(splitted).as<variant>(1) : splitted;
 				}
 				else if (c.section_key == "INCLUDE" && key == "INCLUDE")
 				{
 					auto& existing = c.target_section[key];
-					for (const auto& piece : value_splitted)
+					for (const auto& piece : splitted)
 					{
 						existing.data().push_back(piece);
 					}
 				}
+				else if (new_key)
+				{
+					c.target_section[convert_key_autoinc(key)] = splitted;
+				}
 			}
 			else
 			{
-				ensure_generator_name_unique(key, c.target_template->values);
-				(*c.target_template).values[key] = value_splitted;
+				// ensure_generator_name_unique(key, c.target_template->values);
+				(*c.target_template).values.push_back({key, splitted});
 			}
 		}
 
@@ -1548,7 +1549,7 @@ namespace utils
 			}
 		}
 
-		section& create_section(const std::string& final_name)
+		creating_section& create_section(const std::string& final_name)
 		{
 			sections.push_back({final_name, {}});
 			return sections[sections.size() - 1].second;
@@ -1620,7 +1621,7 @@ namespace utils
 							{
 								templates_map[pieces[k]] = std::make_unique<section_template>(pieces[k], scope);
 								templates_map[template_name]->parents.push_back(templates_map[pieces[k]]);
-							} 
+							}
 							else
 							{
 								templates_map[template_name]->parents.push_back(found->second);
@@ -1654,7 +1655,7 @@ namespace utils
 							{
 								mixins_map[pieces[k]] = std::make_unique<section_template>(pieces[k], scope);
 								mixins_map[template_name]->parents.push_back(mixins_map[pieces[k]]);
-							} 
+							}
 							else
 							{
 								mixins_map[template_name]->parents.push_back(found->second);
@@ -1829,46 +1830,36 @@ namespace utils
 			parse_ini_values(data.c_str(), int(data.size()), scope);
 		}
 
-		void resolve_sequential_keys(section& s)
+		static resulting_section resolve_sequential_keys(creating_section& s)
 		{
+			resulting_section ret;
 			for (const auto& p : s)
 			{
-				if (p.first.find(SPECIAL_KEY_AUTOINCREMENT) != std::string::npos)
+				const auto x = p.first.find(SPECIAL_KEY_AUTOINCREMENT);
+				if (x == std::string::npos)
 				{
-					goto Process;
+					ret[p.first] = p.second;
+					continue;
 				}
-			}
-			return;
 
-			Process:{
-				section ret;
-				for (const auto& p : s)
+				const auto g = p.first.substr(0, x);
+				for (auto i = 0U; i < SPECIAL_AUTOINCREMENT_LIMIT; i++)
 				{
-					const auto x = p.first.find(SPECIAL_KEY_AUTOINCREMENT);
-					if (x == std::string::npos)
+					auto cand = g + std::to_string(i);
+					if (ret.find(cand) == ret.end() && s.find(cand) == s.end())
 					{
-						ret[p.first] = p.second;
-						continue;
-					}
-
-					const auto g = p.first.substr(0, x);
-					for (auto i = 0U; i < SPECIAL_AUTOINCREMENT_LIMIT; i++)
-					{
-						auto cand = g + std::to_string(i);
-						if (ret.find(cand) == ret.end() && s.find(cand) == s.end())
-						{
-							ret[cand] = p.second;
-							break;
-						}
+						ret[cand] = p.second;
+						break;
 					}
 				}
-				s = ret;
 			}
+			return ret;
 		}
 
 		void resolve_sequential()
 		{
 			std::unordered_map<std::string, uint32_t> indices;
+			std::unordered_map<std::string, creating_section> temp_map;
 			for (const auto& p : sections)
 			{
 				auto key = p.first;
@@ -1883,8 +1874,8 @@ namespace utils
 					}
 				}
 
-				auto existing = sections_map.find(key);
-				if (existing != sections_map.end())
+				auto existing = temp_map.find(key);
+				if (existing != temp_map.end())
 				{
 					for (auto& r : p.second)
 					{
@@ -1893,13 +1884,13 @@ namespace utils
 				}
 				else
 				{
-					sections_map[key] = p.second;
+					temp_map[key] = p.second;
 				}
 			}
 
-			for (auto& p : sections_map)
+			for (auto& p : temp_map)
 			{
-				resolve_sequential_keys(p.second);
+				sections_map[p.first] = resolve_sequential_keys(p.second);
 			}
 
 			/*for (const auto& p : sections)
@@ -2045,7 +2036,7 @@ namespace utils
 			stream << std::endl;
 		}
 
-		std::vector<std::pair<std::string, section>> elems(sections.begin(), sections.end());
+		std::vector<std::pair<std::string, resulting_section>> elems(sections.begin(), sections.end());
 		std::sort(elems.begin(), elems.end(), sort_sections);
 		for (const auto& section : elems)
 		{
@@ -2107,7 +2098,7 @@ namespace utils
 		return gen_to_json(data_->sections_map, format);
 	}
 
-	const std::unordered_map<std::string, section>& ini_parser::get_sections() const
+	const std::unordered_map<std::string, resulting_section>& ini_parser::get_sections() const
 	{
 		return data_->sections_map;
 	}
