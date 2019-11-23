@@ -196,7 +196,9 @@ namespace utils
 		const ini_parser_error_handler* error_handler{};
 		bool allow_lua{};
 	};
-
+	
+	static const uint32_t SPECIAL_AUTOINCREMENT_LIMIT = 10000;
+	static const std::string SPECIAL_KEY_AUTOINCREMENT = "[[SPEC:INC]]";
 	static const std::string SPECIAL_MISSING_VARIABLE = "[[SPEC:MISSING:";
 	static const std::string SPECIAL_CALCULATE = "[[SPEC:CALCULATE:";
 	static const std::string SPECIAL_END = ":SPEC]]";
@@ -1031,7 +1033,7 @@ namespace utils
 				{
 					if (v.first == "@ACTIVE") continue;
 					if (c.target_section.find(v.first) != c.target_section.end()) continue;
-					auto& dest = c.target_section[v.first].data();
+					auto& dest = c.target_section[convert_key_autoinc(v.first)].data();
 					for (const auto& piece : v.second.data())
 					{
 						substitute_variable(piece, sc, get_value_finalizer(dest), 0, &referenced_variables);
@@ -1205,7 +1207,7 @@ namespace utils
 						}
 						else if (!is_virtual)
 						{
-							c.target_section[v.first] = dest;
+							c.target_section[convert_key_autoinc(v.first)] = dest;
 						}
 					}
 				}
@@ -1406,6 +1408,20 @@ namespace utils
 			}
 		}
 
+		static std::string convert_key_autoinc(const std::string& key)
+		{
+			std::string group_us;
+			if (is_sequential(key, group_us))
+			{
+				static uint64_t index = 0;
+				return group_us + SPECIAL_KEY_AUTOINCREMENT + std::to_string(index++);
+			} 
+			else 
+			{
+				return key;
+			}
+		}
+
 		void parse_ini_finish(current_section_info& c, const std::string& data, const int non_space, std::string& key,
 			int& started, int& end_at, const std::shared_ptr<variable_scope>& scope)
 		{
@@ -1475,7 +1491,7 @@ namespace utils
 				}
 				else if (new_key)
 				{
-					c.target_section[key] = value_splitted;
+					c.target_section[convert_key_autoinc(key)] = value_splitted;
 				}
 				else if (c.section_key == "INCLUDE" && key == "INCLUDE")
 				{
@@ -1491,6 +1507,18 @@ namespace utils
 				ensure_generator_name_unique(key, c.target_template->values);
 				(*c.target_template).values[key] = value_splitted;
 			}
+		}
+
+		static bool is_sequential(const std::string& s, std::string& group_with_underscore)
+		{
+			if (s.size() <= 4) return false;
+			const auto postfix = s.substr(s.size() - 4);
+			if (postfix == "_..." || postfix == u8"_…" /* how lucky they are the same size lol */)
+			{
+				group_with_underscore = s.substr(0, s.size() - 3);
+				return true;
+			}
+			return false;
 		}
 
 		void parse_ini_finish(std::vector<current_section_info>& cs, const std::string& data, const int non_space, std::string& key,
@@ -1801,24 +1829,57 @@ namespace utils
 			parse_ini_values(data.c_str(), int(data.size()), scope);
 		}
 
+		void resolve_sequential_keys(section& s)
+		{
+			for (const auto& p : s)
+			{
+				if (p.first.find(SPECIAL_KEY_AUTOINCREMENT) != std::string::npos)
+				{
+					goto Process;
+				}
+			}
+			return;
+
+			Process:{
+				section ret;
+				for (const auto& p : s)
+				{
+					const auto x = p.first.find(SPECIAL_KEY_AUTOINCREMENT);
+					if (x == std::string::npos)
+					{
+						ret[p.first] = p.second;
+						continue;
+					}
+
+					const auto g = p.first.substr(0, x);
+					for (auto i = 0U; i < SPECIAL_AUTOINCREMENT_LIMIT; i++)
+					{
+						auto cand = g + std::to_string(i);
+						if (ret.find(cand) == ret.end() && s.find(cand) == s.end())
+						{
+							ret[cand] = p.second;
+							break;
+						}
+					}
+				}
+				s = ret;
+			}
+		}
+
 		void resolve_sequential()
 		{
 			std::unordered_map<std::string, uint32_t> indices;
 			for (const auto& p : sections)
 			{
 				auto key = p.first;
-				if (key.size() > 4)
+				std::string group_us;
+				if (is_sequential(key, group_us))
 				{
-					const auto postfix = key.substr(key.size() - 4);
-					if (postfix == "_..." || postfix == u8"_…" /* how lucky they are the same size lol */)
+					auto& counter = indices[group_us];
+					key = group_us + std::to_string(counter++);
+					for (auto i = 0U; gen_find(sections, key) != sections.end() && i < SPECIAL_AUTOINCREMENT_LIMIT; i++)
 					{
-						const auto group = key.substr(0, key.size() - 3);
-						auto& counter = indices[group];
-						key = group + std::to_string(counter++);
-						for (auto i = 0; gen_find(sections, key) != sections.end() && i < 100; i++)
-						{
-							key = group + std::to_string(counter++);
-						}
+						key = group_us + std::to_string(counter++);
 					}
 				}
 
@@ -1834,6 +1895,11 @@ namespace utils
 				{
 					sections_map[key] = p.second;
 				}
+			}
+
+			for (auto& p : sections_map)
+			{
+				resolve_sequential_keys(p.second);
 			}
 
 			/*for (const auto& p : sections)
