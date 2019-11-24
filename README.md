@@ -576,6 +576,8 @@ KEY_0 = 1,1,1
 - Mixins or just simple sections can use generators as well;
 - Templates can also use `@ACTIVE` flag, similar to mixins;
 - Mixins are being added right at the moment they’re mentioned: you can call the same mixin twice with different parameters by doubling `@MIXIN` and redefining parameters before the second call;
+- You can use `KEY_…=1 KEY_…=2 KEY_0=3` and it’ll get you all three values (first one will turn into KEY_1 and second to KEY_2 to avoid conflict with KEY_0 defined later);
+  - For that to work, values with auto-incrementing keys turn into some mess until the very final stage, so do not reference them in substitutions and expressions, it’s going going to work;
 - Another way to add a parameter to a mixin is to use `@MIXIN = MixinName, Key1 = Value1, Key2 = Value2` syntax, although it is limited;
   - It would also work with generators, although, again, limited (lists are not supported);
 - When certain key was already set before, new assignment will redefine it;
@@ -597,4 +599,5 @@ KEY_0 = 1,1,1
 - To working with files and values, some code from [Reshade](https://github.com/crosire/reshade) by crosire is used;
 - Alphanumerical sorting thanks to [alphanum.hpp](http://www.davekoelle.com/alphanum.html) by David Koelle;
 - JSON is serialized with [library by Niels Lohmann](https://github.com/nlohmann/json);
+- Debug mode is colorized by [rang](https://github.com/agauniyal/rang);
 - Expressions are made possible by [Lua](https://www.lua.org/).
