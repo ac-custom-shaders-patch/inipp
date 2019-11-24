@@ -123,7 +123,13 @@ GRASS_MATERIALS = grass, grass_ext, sbancamento, grass_ext_flat, \
 
 ## Including
 
-One INI-file might reference other files with `[INCLUDE]` sections, like so:
+One INI-file might reference other files with `[INCLUDE]` sections. Included file will be loaded in place of original `[INCLUDE]` section. Also, that section might contain parameters that will be passed to included file (see “Variables”).
+
+Each file can be included only once, secondary inclusions will be ignored. However, if variables within `[INCLUDE]` section are different, the same file might be included more than once.
+
+Another important note: if included file defines a new properly `[SECTION] KEY = VALUE`, it can be overwritten in original file after `[INCLUDE]` section, thus allowing to alter pretty much anything (apart from case with auto-indexing sections and keys).
+
+<details><summary>Example</summary>
 
 ```ini
 [INCLUDE]
@@ -133,71 +139,45 @@ INCLUDE = common/shared_file.ini
 ; as a special section, you can define more than one of those, both files
 ; will be included
 INCLUDE = common/another_shared_file.ini
-```
 
-Included file will be loaded in place of `[INCLUDE]` sections, although with some extra detail (see “Variables”). Important to note: if some property is set twice, second value will be used. So, you can overwrite values in included files with sections coming afterwards.
-
-For shorter version, use this syntax:
-
-```ini
+; shorter syntax
 [INCLUDE: common/shared_file.ini]
 ```
 
+</details>
+
 ## Variables
 
-In order to try and reduce copy-paste, included INI-files can use variables. Their values are set in `[INCLUDE]` sections, and the whole thing looks like this:
+Variables are available in order to reduce copy-paste. They can be defined in a space of a single INI-file as defaults (all included files will inherit them), or they can be defined within a section. Or, `[INCLUDE]` sections might set variables for included files, which won’t affect main file.
 
-###### main.ini
+<details><summary>Basic example</summary>
+
+#### main.ini
 ```ini
 [INCLUDE: extra.ini]
 SomeVariable = 10
 
 ; value of “SomeVariable” won’t be available to “another_extra.ini”
 [INCLUDE: another_extra.ini]
+
+[SECTION_3]
+LocalVariable = 1
+KEY = $LocalVariable
 ```
 
-###### extra.ini
+#### extra.ini
 ```ini
 [SECTION_1]
 KEY = $SomeVariable
-
-[SECTION_2]
-KEY = ${SomeVariable} ; both ways of referring to variable would work
 ```
 
-**Important:** please prefer using CamelCase for variables (and, shown later in docs, templates). CSP, as most other apps, expects values in upper case, so there’ll be much less chance of confict.
+</details>
 
-Included files are able to specify default values for variables like so:
+As you can see from this example, variables are defined just as any other values. Or, in other words, any values could be referenced as variables, as long as they were defined before usage. By default INIpp removes referenced values to keep output tidy, you can change that behavior with `[@INIPP] @ERASE_REFERENCED = 0`.
 
-```ini
-[DEFAULTS]
-SomeVariable = 10
+To use a variable, refer to its name with $ sign in front, like so: `$Variable`. You can also use curly brackets to make it more clear that this is a variable and nothing else: `${Variable}`. If variable is missing, its mention with curly brackets will turn into nothingness, while simpler way will remain unchanged (maybe it’s not a variable at all, but instead, a value which is a bit more weird than usual).
 
-[SECTION_1]
-KEY = $SomeVariable
-```
-
-This way, you can also define and use variables in a main, not included anywhere file, if needed. Not quite sure where it might be needed, but it would work.
-
-Variable, of course, could be set to a list of values, as everything else:
-
-```ini
-[DEFAULTS]
-PointInSpace = 12.3, 14.6, -25.2
-
-[SECTION_1]
-POINT = $PointInSpace
-NUMBER_OF_DIMENSIONS = ${PointInSpace:count}
-COORD_X = ${PointInSpace:0}
-COORD_Y = ${PointInSpace:1}
-COORD_Z = ${PointInSpace:2}
-COORD_LAST = ${PointInSpace:-1}
-COORDS_XY = ${PointInSpace:0:2}      ; taking from 0th to 2th element excluding 2th
-COORDS_XY_ALT = ${PointInSpace:0:-1} ; taking from 0th to 1th element from the end excluding it
-COORDS_XZ = ${PointInSpace:0}, ${PointInSpace:2}
-```
-
-Another difference between referring to variable with and without curly quotes is that, if variable is missing, version without curly quotes will remain unchanged:
+<details><summary>Example with missing variables</summary>
 
 ```ini
 [SECTION_1]
@@ -205,7 +185,81 @@ VALUE_0 = $MissingValue    ; will resolve into “$MissingValue”
 VALUE_1 = ${MissingValue}  ; will resolve into empty value
 ```
 
-Concatenation is also supported:
+</details>
+
+Variables can also be lists and what not, and their mentions will be expanded into lists as well. With curly brackets, you can also use a specific item of a list, or subset of it, or, for example, get amount of items in the list (good way to see if variable was set at all). Indexing starts with 1. Subsets can be defined as either beginning and length (with single “:”), or beginning and excluding end (with “::”), allowing to get all items exluding last, for example.
+
+Possible modes defined in curly brackets (all modes can work with subset if needed):
+  - `:count` — returns amount of values;
+  - `:length` — returns string length of value (or several);
+  - `:exists` — turns to 1 if value(s) exists, or in 0 otherwise;
+  - `:vec2`, `:vec3`, `:vec4` — turn value into a vector: forces certain length, turns everything which isn’t a number to 0, good for sanitizing inputs (see “Expressions”).
+
+<details><summary>Subsets example</summary>
+
+#### Before
+
+```ini
+[DEFAULTS]
+PointInSpace = 12.3, 14.6, -25.2
+
+[SECTION_0]
+POINT = $PointInSpace
+
+; Notice how indices are starting with 1. Older versions were using 0,
+; but now we got Lua onboard and it uses 1. Also, it’s just nicer this way.
+; Usually I wouldn’t do something so breaking, but it seems like there is not
+; a lot of INIpp stuff yet and this is really annoying to have that difference.
+COORD_X = ${PointInSpace:1}
+COORD_Y = ${PointInSpace:2}
+COORD_Z = ${PointInSpace:3}
+
+[SECTION_1]
+NUMBER_OF_DIMENSIONS = ${PointInSpace:count}
+
+HAS_SECOND_DIMENSION = ${PointInSpace:2:exists}
+HAS_THIRD_DIMENSION = ${PointInSpace:3:exists}
+HAS_FOURTH_DIMENSION = ${PointInSpace: 4: exists} ; feel free to use as many spaces as you like
+COORD_LAST = ${PointInSpace:-1}
+
+; Four different ways of taking X and Y values (for three-dimensional value):
+COORDS_XY_0 = ${PointInSpace::2}     ; just take first two elements
+COORDS_XY_1 = ${PointInSpace:1:2}    ; taking two elements from 1th forward
+COORDS_XY_2 = ${PointInSpace: 1 :: 3}   ; taking from 1th to 3th element excluding 3th
+COORDS_XY_3 = ${PointInSpace: 1 :: -1}  ; taking from 0th to 1th element from the end excluding it
+
+COORDS_XY_LENGTH = ${PointInSpace:1:2:length} ; total length of a strings of first two values
+COORDS_XZ = ${PointInSpace:1}, ${PointInSpace:3}
+```
+
+#### After
+
+```ini
+[SECTION_0]
+COORD_X = 12.3
+COORD_Y = 14.6
+COORD_Z = -25.2
+POINT = 12.3,14.6,-25.2
+
+[SECTION_1]
+COORDS_XY_0 = 12.3,14.6
+COORDS_XY_1 = 12.3,14.6
+COORDS_XY_2 = 12.3,14.6
+COORDS_XY_3 = 12.3,14.6
+COORDS_XY_LENGTH = 8
+COORDS_XZ = 12.3,-25.2
+COORD_LAST = -25.2
+HAS_FOURTH_DIMENSION = 0
+HAS_SECOND_DIMENSION = 1
+HAS_THIRD_DIMENSION = 1
+NUMBER_OF_DIMENSIONS = 3
+```
+
+</details>
+
+Substitute of variables within more complex values would also work as expected, same for strings with double quotes. Strings with single quotes don’t get variables though, similar to the way PHP works.
+
+<details><summary>More complex example</summary>
 
 ```ini
 [DEFAULTS]
@@ -218,8 +272,6 @@ GREETING_2 = H$Prefix World     ; or even without quotes
 GREETING_FAILED_1 = 'H${Prefix} World'  ; but not with single quotes
 ```
 
-Concatenation with several values would behave as expected as well, and also, one variable can reference another:
-
 ```ini
 [DEFAULTS]
 SomeVariable = A, B
@@ -230,9 +282,17 @@ LETTERS_WITH_ZEROS = ${SomeVariable}0 ; A0, B0
 LETTERS_AND_LETTERS_IN_BRACKETS = prefix $OtherVariable ; prefix A, prefix B, prefix [A], prefix [B]
 ```
 
+</details>
+
+**Important:** I suggest using CamelCase for variables (and, shown later in docs, templates). CSP, as most other apps, expects values in upper case, so there’ll be much less chance of confict.
+
+There is a scope mechanism for finding a variable, with inheritance and all that, which should work reasonable in most cases. However, I’d still recommend to prefer original names for parameters, as it might not always behave that well trying to figure out which value is to use. As a rule of thumb, parameters from `[DEFAULTS]` have lowest priority, parameters set explicitly for mixins and templates have highest priority, values from target section are in the middle.
+
 ## Skipping
 
-If needed, you can skip entire sections with `ACTIVE = 0`. With this properly found, parser will skip all following properties, while keeping that one. That might be especially helpful with variables:
+If needed, you can force INIpp to remove content of entire sections with `ACTIVE = 0`. If such value has been set, parser will erase any other values from the section at the final stage. Convinient for making some things optional.
+
+<details><summary>Example</summary>
 
 ```ini
 [SHADER_REPLACEMENT_...]
@@ -245,6 +305,13 @@ ACTIVE = ${OtherMaterialsToTweak:count}  ; if materials are not set, whole secti
 MATERIALS = $OtherMaterialsToTweak
 SHADER = ksPerPixelNM
 ```
+
+</details>
+
+## Templates, mixins, generators, expressions and functions
+
+
+<details><summary>See more</summary>
 
 ## Templates
 
@@ -403,7 +470,7 @@ PROP_1 = fresnelC, 0.08
 PROP_2 = fresnelEXP, 5
 ```
 
-**Important:** variables substitution works differently for expressions. Strings get wrapped in quotes, missing values turn to `nil`, and if variable is a list, it’ll be passed as a table. Also, of course, if expression returns table, it’ll turn into a list.
+**Important:** variables substitution works differently for expressions. Strings get wrapped in quotes, missing values turn to `nil`, and if variable is a list, it’ll be passed as a table. Also, of course, if expression returns table, it’ll turn into a list. If variable has the length of 2, 3 or 4 and consists of nothing but valid numbers, it’ll be passed as a vector (the same table, but with working operators). Also, you can create new vectors in Lua using `vec2(x, y)`, `vec3(x, y, z)` and `vec4(x, y, z, w)`. Vectors also have methods `vec2(x, y):length()`, `vec2(x, y):normalize()` and `dot(vec2(x, y), vec2(z, w))`.
 
 ## Functions
 
@@ -506,7 +573,7 @@ For extra special cases, one generator line can spawn multiple sections:
 ```ini
 [TEMPLATE: _NotSoSimpleGenerator]
 @OUTPUT = SIMPLE_GENERATOR_...
-KEY_0 = $0
+KEY_0 = $1
 
 [TEMPLATE: NotSoSimpleGenerator]
 @GENERATOR = _NotSoSimpleGenerator, 2
@@ -514,7 +581,7 @@ KEY_0 = $0
 [NotSoSimpleGenerator]
 ```
 
-Notice how `$0` turns to the index:
+Notice how `$1` turns to the index:
 
 ```ini
 [SIMPLE_GENERATOR_0]
@@ -528,8 +595,8 @@ And multidimensional case:
 
 ```ini
 [TEMPLATE: _NotSoSimpleGenerator]
-@OUTPUT = $" 'SIMPLE_GENERATOR_' .. $0 .. '_' .. $1 .. '_' .. $2 "
-KEY_0 = $0, $1, $2
+@OUTPUT = $" 'SIMPLE_GENERATOR_' .. $1 .. '_' .. $2 .. '_' .. $3 "
+KEY_0 = $1, $2, $3
 
 [TEMPLATE: NotSoSimpleGenerator]
 @GENERATOR = _NotSoSimpleGenerator, 2, 2, 2
@@ -563,9 +630,10 @@ KEY_0 = 1,1,0
 KEY_0 = 1,1,1
 ```
 
-## A few extra hardcore tips:
+</details>
 
-- Parser removes values referenced by other values, assuming those are parameters. To change that behaviour, use `[@INIPP] @ERASE_REFERENCED = 0`;
+## A few extra tips:
+
 - You can see more interesting examples in “tests/auto” folder;
 - Single section can implement several templates at once: `[Template1, Template2]`, or: `[EXPLICIT_NAME : Template1, Template2]`;
   - It can also use the same template several times: `[EXPLICIT_NAME : Template, Template]`, might be useful with auto-indexing for keys;
@@ -591,7 +659,7 @@ KEY_0 = 1,1,1
 
 # Plans
 
-- There is no support for vectors or colors in expressions. At least they can receive and output tables now;
+- Something for expressions to work with colors;
 - Possibly, scripts could have read & write access to whole section.
 
 # Credits

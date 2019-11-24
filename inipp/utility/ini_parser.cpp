@@ -1,13 +1,11 @@
-﻿// TODO: Use expressions when referring to mixins and other things
-// Generators already use them
-
-#include "stdafx.h"
+﻿#include "stdafx.h"
 #include "ini_parser.h"
-#include "variant.h"
+#include "ini_parser_lua_lib.h"
+#include <iomanip>
 #include <lua.hpp>
 #include <utility/alphanum.h>
 #include <utility/json.h>
-#include <iomanip>
+#include <utility/variant.h>
 #include <utility>
 
 #ifdef USE_SIMPLE
@@ -135,6 +133,7 @@ namespace utils
 	struct variable_scope : std::enable_shared_from_this<variable_scope>
 	{
 		creating_section explicit_values;
+		creating_section include_params;
 		creating_section default_values;
 		const creating_section* target_section;
 		std::vector<const variable_scope*> local_fallbacks;
@@ -213,15 +212,25 @@ namespace utils
 
 		const variant* find_fallback(const std::string& name) const
 		{
+			{
+				const auto v = include_params.find(name);
+				if (v != include_params.end())
+				{
+					return &v->second;
+				}
+			}
+
 			if (const auto ret = parent ? parent->find_fallback(name) : nullptr)
 			{
 				return ret;
 			}
 
-			const auto v = default_values.find(name);
-			if (v != default_values.end())
 			{
-				return &v->second;
+				const auto v = default_values.find(name);
+				if (v != default_values.end())
+				{
+					return &v->second;
+				}
 			}
 
 			for (auto f : local_fallbacks)
@@ -251,6 +260,7 @@ namespace utils
 	};
 
 	static const uint32_t SPECIAL_AUTOINCREMENT_LIMIT = 10000;
+	static const int SPECIAL_RANGE_LIMIT = 10000;
 	static const std::string SPECIAL_KEY_AUTOINCREMENT = "[[SPEC:INC]]";
 	static const std::string SPECIAL_MISSING_VARIABLE = "[[SPEC:MISSING:";
 	static const std::string SPECIAL_CALCULATE = "[[SPEC:CALCULATE:";
@@ -282,6 +292,7 @@ namespace utils
 			luaopen_math(lua_state.ptr);
 			luaopen_string(lua_state.ptr);
 			#endif
+			luaL_loadstring(lua_state.ptr, LUA_STD_LUB) || lua_pcall(lua_state.ptr, 0, -1, 0);
 			lua_state.is_clean = true;
 		}
 		return lua_state.ptr;
@@ -496,54 +507,9 @@ namespace utils
 		value_finalizer(std::vector<std::string>& dest, const script_params* params, bool process_values = true)
 			: dest(dest), params(params), process_values(process_values) { }
 
-		static void fix_word(std::string& result, const std::string& word)
-		{
-			if (word == "abs") result += "math.abs";
-			else if (word == "acos") result += "math.acos";
-			else if (word == "asin") result += "math.asin";
-			else if (word == "atan") result += "math.atan";
-			else if (word == "ceil") result += "math.ceil";
-			else if (word == "cos") result += "math.cos";
-			else if (word == "deg") result += "math.deg";
-			else if (word == "exp") result += "math.exp";
-			else if (word == "floor") result += "math.floor";
-			else if (word == "fmod" || word == "mod") result += "math.fmod";
-			else if (word == "log") result += "math.log";
-			else if (word == "max") result += "math.max";
-			else if (word == "min") result += "math.min";
-			else if (word == "pi") result += "math.pi";
-			else if (word == "pow") result += "math.pow";
-			else if (word == "rad") result += "math.rad";
-			else if (word == "sin") result += "math.sin";
-			else if (word == "sqrt") result += "math.sqrt";
-			else if (word == "tan") result += "math.tan";
-			else result += word;
-		}
-
 		static std::string fix_expression(const std::string& expr)
 		{
-			std::string result = "return (";
-			auto b = -1;
-			for (auto i = 0, t = int(expr.size()); i < t; i++)
-			{
-				const auto c = expr[i];
-				if (islower(c))
-				{
-					if (b == -1) b = i;
-				}
-				else
-				{
-					if (b != -1)
-					{
-						if (b != 0 && (expr[b - 1] == '.' || expr[b - 1] == ':')) result += expr.substr(b, i - b);
-						else fix_word(result, expr.substr(b, i - b));
-						b = -1;
-					}
-					result += c;
-				}
-			}
-			result += ")";
-			return result;
+			return "return (" + expr + ")";
 		}
 
 		void calculate(const std::string& expr, const std::string& prefix, const std::string& postfix) const
@@ -631,25 +597,33 @@ namespace utils
 		enum class special_mode
 		{
 			none,
-			size
+			size,
+			length,
+			exists,
+			vec2,
+			vec3,
+			vec4,
 		};
 
 		std::string name;
-		int substr_from = 0, substr_to = std::numeric_limits<int>::max();
+		int substr_from = 0;
+		int substr_to = std::numeric_limits<int>::max();
 		bool with_fallback;
 		special_mode mode{};
 
 		variable_info() : with_fallback(false) {}
-		variable_info(std::string name) : name(std::move(name)), with_fallback(true) {}
-		variable_info(std::string name, int from, int to) : name(std::move(name)), substr_from(from), substr_to(to), with_fallback(false) {}
-		variable_info(std::string name, special_mode mode) : name(std::move(name)), with_fallback(false), mode(mode) {}
 
-		bool get_values(const std::shared_ptr<variable_scope>& include_vars, std::vector<std::string>& result)
+		explicit variable_info(std::string name) : name(std::move(name)), with_fallback(true) {}
+
+		variable_info(std::string name, const int from, const int to, const special_mode mode)
+			: name(std::move(name)), substr_from(from), substr_to(to), with_fallback(false), mode(mode) {}
+
+		bool get_values(const std::shared_ptr<variable_scope>& include_vars, std::vector<std::string>& result, const value_finalizer& dest)
 		{
 			const auto v = include_vars->find(name);
 			if (!v)
 			{
-				if (mode == special_mode::size)
+				if (mode == special_mode::size || mode == special_mode::length)
 				{
 					result.emplace_back("0");
 					return true;
@@ -657,17 +631,67 @@ namespace utils
 				return false;
 			}
 
+			if (substr_to < 0 || substr_to == 0 && substr_from < 0) substr_to += int(v->data().size());
+			if (substr_from < 0) substr_from += int(v->data().size());
+
 			switch (mode)
 			{
 				case special_mode::size:
 				{
-					result.push_back(std::to_string(v->data().size()));
+					const auto count = std::min(substr_to - substr_from, int(v->data().size()) - substr_from);
+					result.push_back(std::to_string(count));
+					break;
+				}
+				case special_mode::length:
+				{
+					size_t count = 0;
+					for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
+					{
+						count += v->data()[j].size();
+					}
+					result.push_back(std::to_string(count));
+					break;
+				}
+				case special_mode::exists:
+				{
+					result.push_back(substr_from < int(v->data().size()) && substr_from < substr_to ? "1" : "0");
+					break;
+				}
+				case special_mode::vec2:
+				case special_mode::vec3:
+				case special_mode::vec4:
+				{
+					const auto count = int(std::min(substr_to - substr_from, int(v->data().size()) - substr_from));
+					const auto vec_size = int(2 + int(mode) - int(special_mode::vec2));
+					for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
+					{
+						if (is_number(v->data()[j]))
+						{
+							result.push_back(v->data()[j]);
+						}
+						else
+						{
+							result.push_back("0");
+							dest.params->error_handler->on_warning(dest.params->file, ("Number expected, instead got '" + v->data()[j] + "', variable: " + name).c_str());
+						}
+						if (result.size() >= size_t(vec_size)) break;
+					}
+
+					if (result.size() != 1 && count != vec_size)
+					{
+						dest.params->error_handler->on_warning(dest.params->file, ("Expected version with " + std::to_string(vec_size) + " values, got " 
+							+ std::to_string(count) + ", variable " + name).c_str());
+					}
+
+					const auto fill_with = result.size() == 1 ? result[0] : "0";
+					while (result.size() < size_t(vec_size))
+					{
+						result.push_back(fill_with);
+					}
 					break;
 				}
 				case special_mode::none:
 				{
-					if (substr_to < 0 || substr_to == 0 && substr_from < 0) substr_to += int(v->data().size());
-					if (substr_from < 0) substr_from += int(v->data().size());
 					for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
 					{
 						result.push_back(v->data()[j]);
@@ -685,7 +709,7 @@ namespace utils
 		void substitute(const std::shared_ptr<variable_scope>& include_vars, const value_finalizer& dest)
 		{
 			std::vector<std::string> result;
-			if (get_values(include_vars, result))
+			if (get_values(include_vars, result, dest))
 			{
 				for (const auto& r : result) dest.add(r);
 			}
@@ -699,22 +723,89 @@ namespace utils
 			}
 		}
 
+		static bool is_number(const std::string& s)
+		{
+			auto started = 0;
+			auto ended = false;
+			auto dot = false;
+			auto exponent = false;
+			auto exponent_end = false;
+			auto hex = false;
+
+			for (auto i = 0U; i < s.size(); i++)
+			{
+				auto c = s[i];
+				if (is_space(c))
+				{
+					if (started) ended = true;
+					continue;
+				}
+
+				if (ended) return false;
+
+				if (c == 'x' && !hex && started == 1 && s[i - 1] == '0')
+				{
+					hex = true;
+					started++;
+					continue;
+				}
+
+				if (c == '-' || c == '+')
+				{
+					if (started) return false;
+					started++;
+					continue;
+				}
+
+				if (started && (c == 'e' || c == 'E') && !hex)
+				{
+					if (exponent) return false;
+					exponent = true;
+					started++;
+					continue;
+				}
+
+				started++;
+
+				if (c == '.' && !hex)
+				{
+					if (dot) return false;
+					dot = true;
+					continue;
+				}
+
+				if (isdigit(c))
+				{
+					if (exponent) exponent_end = true;
+					continue;
+				}
+				return false;
+			}
+			return !exponent || exponent_end;
+		}
+
 		static void substitute_wrap(std::string& s)
 		{
-			for (auto c : s)
+			if (!is_number(s))
 			{
-				if (!isdigit(c) && c != '-' && c != '.' && c != '+' && c != 'e' && c != 'E') goto Wrap;
+				s = "\"" + s + "\"";
 			}
-			return;
-		Wrap:
-			s = "\"" + s + "\"";
+		}
+
+		static bool all_numbers(const std::vector<std::string>& v)
+		{
+			for (const auto& s : v)
+			{
+				if (!is_number(s)) return false;
+			}
+			return true;
 		}
 
 		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, const value_finalizer& dest,
 			const bool expr_mode)
 		{
 			std::vector<std::string> result;
-			if (!get_values(include_vars, result) && !expr_mode)
+			if (!get_values(include_vars, result, dest) && !expr_mode)
 			{
 				#if defined _DEBUG && defined USE_SIMPLE
 				// std::cerr << "Missing variable: " << name << '\n';
@@ -748,6 +839,17 @@ namespace utils
 					substitute_wrap(result[0]);
 					s += result[0];
 				}
+				else if (result.size() <= 4 && all_numbers(result))
+				{
+					s += result.size() == 2 ? "vec2(" : result.size() == 3 ? "vec3(" : "vec4(";
+					for (auto j = 0, jt = int(result.size()); j < jt; j++)
+					{
+						if (j) s += ",";
+						substitute_wrap(result[j]);
+						s += result[j];
+					}
+					s += ")";
+				}
 				else
 				{
 					s += "{";
@@ -775,28 +877,70 @@ namespace utils
 		}
 	};
 
-	static variable_info check_variable(const std::string& s)
+	static int stoi(const std::string& s, int default_value, bool* set_ptr = nullptr)
+	{
+		try
+		{
+			if (s.empty() || !isdigit(s[0]) && s[0] != '-')
+			{
+				if (set_ptr) *set_ptr = false;
+				return default_value;
+			}
+			const auto ret = std::stoi(s);
+			if (set_ptr) *set_ptr = true;
+			return ret;
+		}
+		catch (std::exception&)
+		{
+			if (set_ptr) *set_ptr = false;
+			return default_value;
+		}
+	}
+
+	static int stoi(const std::vector<std::string>& v, int index, int default_value, bool* set_ptr = nullptr)
+	{
+		if (index < 0 || index >= int(v.size()))
+		{
+			if (set_ptr) *set_ptr = false;
+			return default_value;
+		}
+		return stoi(v[index], default_value, set_ptr);
+	}
+
+	static variable_info check_variable(const std::string& s, const value_finalizer& dest)
 	{
 		if (s.size() < 2) return {};
 		if (s[0] != '$') return {};
 		if (s[1] == '{' && s[s.size() - 1] == '}')
 		{
 			const auto pieces = split_string(s.substr(2, s.size() - 3), ":", false, true);
-			if (pieces.empty() || pieces.size() > 3) return {};
-			if (!is_identifier(pieces[0])) return {};
-			if (pieces.size() == 2 && (pieces[1] == "size" || pieces[1] == "count" || pieces[1] == "length"))
+			const auto size = pieces.size();
+			if (size == 0 || size > 5 || !is_identifier(pieces[0])) return {};
+			bool from_set;
+			auto from = stoi(pieces, 1, 1, &from_set);
+			auto to = stoi(pieces, 2, from_set ? 1 : SPECIAL_RANGE_LIMIT) + from;
+			if (size > 3 && pieces[2].empty()) to = stoi(pieces, 3, from_set ? from + 1 : SPECIAL_RANGE_LIMIT);
+			auto mode = variable_info::special_mode::none;
+			if (size > 1)
 			{
-				return {pieces[0], variable_info::special_mode::size};
+				if (pieces[size - 1] == "size" || pieces[size - 1] == "count") mode = variable_info::special_mode::size;
+				else if (pieces[size - 1] == "length") mode = variable_info::special_mode::length;
+				else if (pieces[size - 1] == "exists") mode = variable_info::special_mode::exists;
+				else if (pieces[size - 1] == "vec2") mode = variable_info::special_mode::vec2;
+				else if (pieces[size - 1] == "vec3") mode = variable_info::special_mode::vec3;
+				else if (pieces[size - 1] == "vec4") mode = variable_info::special_mode::vec4;
 			}
-			if (pieces.size() > 1 && (pieces[1].empty() || !isdigit(pieces[1][0]) && pieces[1][0] != '-')) return {};
-			if (pieces.size() > 2 && (pieces[2].empty() || !isdigit(pieces[2][0]) && pieces[2][0] != '-')) return {};
-			const auto from = pieces.size() == 1 ? 0 : std::stoi(pieces[1]);
-			const auto to = pieces.size() == 1 ? std::numeric_limits<int>::max() : pieces.size() == 2 ? from + 1 : std::stoi(pieces[2]);
-			return {pieces[0], from, to};
+			if (from == 0)
+			{
+				dest.params->error_handler->on_error(dest.params->file, ("Indices start with 1: " + pieces[0] + ", got: '" + s + "'").c_str());
+			}
+			if (from > 0) from--;
+			if (to > 0) to--;
+			return {pieces[0], from, to, mode};
 		}
 		const auto vname = s.substr(1);
 		if (!is_identifier(vname)) return {};
-		return {vname};
+		return variable_info{vname};
 	}
 
 	static void substitute_variable(const std::string& value, const std::shared_ptr<variable_scope>& include_vars, const value_finalizer& dest, const int stack,
@@ -811,7 +955,7 @@ namespace utils
 
 		if (stack < 10)
 		{
-			auto var = check_variable(value);
+			auto var = check_variable(value, dest);
 			if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
 			if (!var.name.empty())
 			{
@@ -834,7 +978,7 @@ namespace utils
 				const auto var_end = var_begin == std::string::npos ? std::string::npos : value.find_first_of('}', var_begin);
 				if (var_end != std::string::npos)
 				{
-					var = check_variable(value.substr(var_begin, var_end - var_begin + 1));
+					var = check_variable(value.substr(var_begin, var_end - var_begin + 1), dest);
 					if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
 					std::vector<std::string> temp;
 					const auto finalizer = value_finalizer{temp, dest.params, false};
@@ -860,7 +1004,7 @@ namespace utils
 					}
 					if (var_end != var_begin + 1)
 					{
-						var = check_variable(value.substr(var_begin, var_end - var_begin));
+						var = check_variable(value.substr(var_begin, var_end - var_begin), dest);
 						if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
 						std::vector<std::string> temp;
 						const auto finalizer = value_finalizer{temp, dest.params, false};
@@ -1130,7 +1274,7 @@ namespace utils
 				for (auto i = 0, n = repeats[repeats_phase]; i < n; i++)
 				{
 					auto gen_scope = scope->inherit();
-					gen_scope->explicit_values[std::to_string(repeats_phase)] = i;
+					gen_scope->explicit_values[std::to_string(repeats_phase + 1)] = i;
 					resolve_generator_iteration(t, key, section_key, tpl, gen_scope, referenced_variables, repeats, repeats_phase + 1);
 				}
 			}
@@ -1347,8 +1491,8 @@ namespace utils
 					for (const auto& p : c.target_section)
 					{
 						if (p.first == "INCLUDE") continue;
-						if (p.first.find("VAR") == 0) include_scope->default_values[p.second.as<std::string>()] = p.second.as<variant>(1);
-						else include_scope->default_values[p.first] = p.second;
+						if (p.first.find("VAR") == 0) include_scope->include_params[p.second.as<std::string>()] = p.second.as<variant>(1);
+						else include_scope->include_params[p.first] = p.second;
 					}
 
 					// It’s important to copy values and clear section before parsing included files: those
@@ -1356,7 +1500,7 @@ namespace utils
 					auto values = to_include->second.data();
 					c.target_section.clear();
 
-					const auto vars_fp = vars_fingerprint(include_scope->default_values);
+					const auto vars_fp = vars_fingerprint(include_scope->include_params);
 					for (auto& i : values)
 					{
 						parse_file(find_referenced(i, vars_fp), include_scope, vars_fp);

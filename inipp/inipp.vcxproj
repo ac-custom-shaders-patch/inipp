@@ -167,6 +167,7 @@
     <ClInclude Include="utility\alphanum.h" />
     <ClInclude Include="utility\filesystem.h" />
     <ClInclude Include="utility\ini_parser.h" />
+    <ClInclude Include="utility\ini_parser_lua_lib.h" />
     <ClInclude Include="utility\json.h" />
     <ClInclude Include="utility\variant.h" />
   </ItemGroup>
