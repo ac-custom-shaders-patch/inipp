@@ -5,8 +5,10 @@
 #include <utility/json.h>
 #include <iomanip>
 
+#define NOMINMAX
 #include <cstdio>
 #include <windows.h>
+#include <rang.hpp>
 #pragma execution_character_set("utf-8")
 
 #pragma comment(lib, "Shlwapi.lib")
@@ -108,18 +110,20 @@ static std::string serialize(const utils::ini_parser& parser, bool output_format
 }
 
 #define STYLE(X) u8"[" X "m"
-#define STYLE_QUEUE STYLE("93")
-#define STYLE_ERROR STYLE("91")
-#define STYLE_SUCCESS STYLE("92")
-#define STYLE_INFO STYLE("96")
-#define STYLE_RESET STYLE("0")
+#define STYLE_QUEUE rang::fgB::yellow
+#define STYLE_ERROR rang::fgB::red
+#define STYLE_SUCCESS rang::fgB::green
+#define STYLE_INFO rang::fg::cyan
 
 void do_debug_run()
 {
-    SetConsoleOutputCP(65001);
+	SetConsoleOutputCP(65001);
 	const auto handler = error_handler(false, true);
-	auto clear = true;
-	std::cout << u8"[s";
+	const auto terminal_good = rang::rang_implementation::supportsColor()
+		&& rang::rang_implementation::isTerminal(std::cout.rdbuf())
+		&& rang::rang_implementation::supportsAnsi(std::cout.rdbuf());
+	if (terminal_good) std::cout << u8"[s";
+	auto clear = terminal_good;
 
 	for (const auto& entry : std::experimental::filesystem::directory_iterator("auto"))
 	{
@@ -128,7 +132,7 @@ void do_debug_run()
 			auto filename = utils::path(entry.path().native());
 			if (filename.filename().string()[2] != '_') continue;
 
-			std::cout << STYLE_QUEUE u8"• Testing " << filename.filename_without_extension().string().substr(3) << u8"… " STYLE_RESET;
+			std::cout << STYLE_QUEUE << u8"• Testing " << filename.filename_without_extension().string().substr(3) << u8"… " << rang::style::reset;
 			auto data = utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, simple_reader(), handler).finalize().to_ini();
 			auto required = filename.parent_path() / filename.filename_without_extension() + "__result.ini";
 
@@ -136,19 +140,19 @@ void do_debug_run()
 			{
 				if (simple_reader().read(required) == data)
 				{
-					std::cout << STYLE_SUCCESS u8"OK ✔" STYLE_RESET << std::endl;
+					std::cout << STYLE_SUCCESS << u8"OK ✔" << rang::style::reset << std::endl;
 				}
 				else
 				{
 					clear = false;
-					std::cout << STYLE_ERROR u8"failed ⚠" STYLE_RESET << std::endl;
+					std::cout << STYLE_ERROR << u8"failed ⚠" << rang::style::reset << std::endl;
 					std::cout << data;
 				}
-			} 
+			}
 			else
 			{
 				clear = false;
-				std::cout << STYLE_INFO u8"new result ✳" STYLE_RESET << std::endl;
+				std::cout << STYLE_INFO << u8"new result ✳" << rang::style::reset << std::endl;
 				std::ofstream(required.wstring()) << data;
 			}
 		}
@@ -158,10 +162,10 @@ void do_debug_run()
 	if (exists(dev_input))
 	{
 		if (clear) std::cout << u8"[2J[u";
-		std::cout << STYLE_QUEUE u8"• Running developing input:" STYLE_RESET << std::endl;
+		std::cout << STYLE_QUEUE << u8"• Running developing input:" << rang::style::reset << std::endl;
 		std::cout << utils::ini_parser(true, {}).allow_lua(true).parse_file(dev_input, simple_reader(), handler).finalize().to_ini();
 	}
-	
+
 	for (const auto& entry : std::experimental::filesystem::directory_iterator("performance"))
 	{
 		if (entry.path().extension() == ".ini" && entry.path().native().find(L"__") == std::wstring::npos)
@@ -169,25 +173,38 @@ void do_debug_run()
 			auto filename = utils::path(entry.path().native());
 			if (filename.filename().string()[2] != '_') continue;
 
-			std::cout << STYLE_QUEUE u8"• Measuring performance of " << filename.filename_without_extension().string().substr(3) << u8"… " STYLE_RESET;
+			std::cout << STYLE_QUEUE << u8"• Measuring performance of " << filename.filename_without_extension().string().substr(3) << u8"… " << rang::style::reset;
 			caching_reader reader;
 			if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
 			{
 				throw std::runtime_error("Unexpected");
 			}
-			const auto start = std::chrono::high_resolution_clock::now();
-			const auto run_count = 10;
-			for (auto i = 0; i < run_count; i++)
+
+			for (auto j = 0; j < 4; j++)
 			{
-				if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
+				const auto start = std::chrono::high_resolution_clock::now();
+				const auto run_count = 20;
+				for (auto i = 0; i < run_count; i++)
 				{
-					throw std::runtime_error("Unexpected");
+					if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
+					{
+						throw std::runtime_error("Unexpected");
+					}
 				}
+				const auto taken_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
+				const auto taken_ms = double(taken_ns) / 1e6 / double(run_count);
+				std::cout << STYLE_INFO << std::fixed << std::setprecision(2) << taken_ms << u8" ms" << rang::style::reset << " ";
 			}
-			const auto time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
-			std::cout << STYLE_INFO << std::fixed << std::setprecision(2) << double(time_taken) / 1e6 / double(run_count) << u8" ms" STYLE_RESET << std::endl;
+
+			std::cout << std::endl;
 		}
 	}
+
+	utils::ini_parser::leaks_check([](const char* name, long count)
+	{
+		if (count == 0) return;
+		std::cout << STYLE_QUEUE << "• Leaked " << name << ": " << count << rang::style::reset << std::endl;
+	});
 }
 
 int main(int argc, const char* argv[])

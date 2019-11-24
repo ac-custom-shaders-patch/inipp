@@ -26,13 +26,43 @@ Skins = yellow
 
 # Features
 
-## Auto-indexing sections
+## Auto-indexing sections and values
 
-Instead of writing `[SECTION_0]`, `[SECTION_1]`, `[SECTION_2]`, … and painfully keeping track of used indices to avoid conflicts, just use “...” (or “…”). Parser will automatically find next free index for each section, keeping them in order. You can combine both styles too, to force specific sections to have specific indices if required. No more conflics.
+Instead of writing `[SECTION_0]`, `[SECTION_1]`, `[SECTION_2]`, … and painfully keeping track of used indices to avoid conflicts, just use “...” (or “…”). Parser will automatically find next free index for each section, keeping them in order. You can combine both styles too, to force specific sections to have specific indices if required. No more conflics. Similar thing will work with values as well.
+
+<details><summary>Example</summary>
+
+#### Before
+
+```ini
+[SECTION_...]
+PROP_... = value 1
+PROP_... = value 1
+
+[SECTION_...]
+PROP_... = value 1
+```
+
+#### After
+
+```ini
+[SECTION_0]
+PROP_0 = value 1
+PROP_1 = value 1
+
+[SECTION_1]
+PROP_0 = value 1
+```
+
+</details>
 
 ## Setting values to several sections at once
 
-To reduce copy-paste, here, both sections will get “KEY_SHARED = VALUE” property:
+Quite often, different sections need to contain the same values. With INIpp, to save time and make things easier, you can move such values in a common section: list names of sections in square brackets separated by comma, and all values will be assigned to all the sections in the list.
+
+<details><summary>Example</summary>
+
+#### Before
 
 ```ini
 [SECTION_0]
@@ -45,9 +75,25 @@ KEY = 1
 KEY_SHARED = VALUE
 ```
 
+#### After
+
+```ini
+[SECTION_0]
+KEY = 0
+KEY_SHARED = VALUE
+
+[SECTION_1]
+KEY = 1
+KEY_SHARED = VALUE
+```
+
+</details>
+
 ## Quotes for specific values
 
-With regular INI-files (at least the way they work in Assetto Corsa), it’s impossible to have a multi-line value, or a value with symbols like “[”, “]”, “;”, “,” or “//”. With INIpp, you can wrap values in quotes, either “"” or “'”, and it’ll parse value as it is:
+With regular INI-files (at least the way they work in Assetto Corsa), it’s impossible to have a multi-line value, or a value with symbols like “[”, “]”, “;”, “,” or “//”. With INIpp, you can wrap values in quotes, either “"” or “'”. Character escaping also works.
+
+<details><summary>Example</summary>
 
 ```ini
 [SECTION]
@@ -59,9 +105,13 @@ KEY_4 = "easy to create
 multiline strings too"
 ```
 
+</details>
+
 ## Multi-line lists
 
-Some of those filters for CSP are long, very long. Quite difficult to work with. Well, not anymore:
+Some of those filters for CSP are long, very long. Quite difficult to work with. So now you can use “\” at the end of the line and parser will treat values as if it’s a singe line. But, of course, if there are quotes around it, it’s not going to work.
+
+<details><summary>Example</summary>
 
 ```ini
 [GRASS_FX]
@@ -69,7 +119,7 @@ GRASS_MATERIALS = grass, grass_ext, sbancamento, grass_ext_flat, \
   gras_brd_ext, grs-brd
 ```
 
-Use “\” at the end of the line and parser will treat values as if it’s a singe line. But, of course, if there are quotes around it, it’s not going to work.
+</details>
 
 ## Including
 
@@ -515,16 +565,30 @@ KEY_0 = 1,1,1
 
 ## A few extra hardcore tips:
 
+- Parser removes values referenced by other values, assuming those are parameters. To change that behaviour, use `[@INIPP] @ERASE_REFERENCED = 0`;
+- You can see more interesting examples in “tests/auto” folder;
 - Single section can implement several templates at once: `[Template1, Template2]`, or: `[EXPLICIT_NAME : Template1, Template2]`;
-- Template can inherit several templates at once: `[TEMPLATE: Template1 EXTENDS Template2, Template3]`;
-- If, when template is used, name is set explicitly, it can be accessed with `$TARGET`;
-- Use expressions when referring to sub-template in generator;
-- Use index variables when setting parameters for sub-templates in generator;
-- When editing configs for CSP, add `[__DEBUG] DUMP_FLATTEN_INI = 1` to see what config has unwrapped to (would be saved nearby).
+  - It can also use the same template several times: `[EXPLICIT_NAME : Template, Template]`, might be useful with auto-indexing for keys;
+  - Templates can inherit several templates at once: `[TEMPLATE: Template1 EXTENDS Template2, Template3]`;
+- If section is split in several parts, each with its own `: Template`, template will be processed several times;
+- If `${VariableWithCurlyBrackets}` is not defined, it’ll turn into empty space;
+- If `$SimpleVariable` is missing, it’ll remain as `$SimpleVariable`; 
+- Mixins or just simple sections can use generators as well;
+- Templates can also use `@ACTIVE` flag, similar to mixins;
+- Mixins are being added right at the moment they’re mentioned: you can call the same mixin twice with different parameters by doubling `@MIXIN` and redefining parameters before the second call;
+- Another way to add a parameter to a mixin is to use `@MIXIN = MixinName, Key1 = Value1, Key2 = Value2` syntax, although it is limited;
+  - It would also work with generators, although, again, limited (lists are not supported);
+- When certain key was already set before, new assignment will redefine it;
+  - But, templates and mixins can’t redefine a value set by main section, even though it runs after main section was set (so it could provide template with parameters);
+  - However, templates and mixins can redefine parameters which were set by themselves;
+  - This allows to create things like counter to see how many times a mixin was called within current section: `Count = $" $Count == nil and 1 or $Count + 1 "`;
+- If, when template is used, section name is set explicitly, it can be accessed with `$TARGET`;
+- You can use expressions when referring to sub-template in generator;
+- You can use index variables when setting parameters for sub-templates in generator;
+- When editing configs for CSP, add `[__DEBUG] DUMP_FLATTEN_INI = 1` to see what config has unwrapped to (would be saved nearby; that’s not a feature of this preprocessor).
 
 # Plans
 
-- Auto-indexing values might have been a nice addition;
 - There is no support for vectors or colors in expressions. At least they can receive and output tables now;
 - Possibly, scripts could have read & write access to whole section.
 

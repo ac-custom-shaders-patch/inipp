@@ -8,6 +8,7 @@
 #include <utility/alphanum.h>
 #include <utility/json.h>
 #include <iomanip>
+#include <utility>
 
 #ifdef USE_SIMPLE
 #define DBG(v) std::cout << "[" << __func__ << ":" << __LINE__ << "] " << #v << "=" << (v) << '\n';
@@ -48,7 +49,7 @@ namespace utils
 		const auto i = str.find_first_not_of(chars);
 		if (i == std::string::npos)
 		{
-			str = std::string();
+			str.clear();
 			return;
 		}
 		if (i > 0) str.erase(0, i);
@@ -76,11 +77,12 @@ namespace utils
 		return result;
 	}
 
-	static bool matches_from(const std::string& s, int index, const char* c)
+	inline bool matches_from(const std::string& s, int index, const char* c)
 	{
+		const auto z = int(s.size());
 		for (auto h = c; *h; h++)
 		{
-			if (index >= int(s.size()) || s[index++] != *h) return false;
+			if (index >= z || s[index++] != *h) return false;
 		}
 		return true;
 	}
@@ -97,9 +99,9 @@ namespace utils
 
 	static bool is_identifier(const std::string& s)
 	{
-		for (auto i = 0, t = int(s.size()); i < t; i++)
+		for (auto i : s)
 		{
-			if (!is_identifier_part(s[i])) return false;
+			if (!is_identifier_part(i)) return false;
 		}
 		return true;
 	}
@@ -112,6 +114,22 @@ namespace utils
 	static bool sort_items(const std::pair<std::string, variant>& a, const std::pair<std::string, variant>& b)
 	{
 		return doj::alphanum_comp(a.first, b.first) < 0;
+	}
+
+	static struct
+	{
+		long variable_scope{};
+		long current_sections{};
+		long templates{};
+	} counters;
+
+	void ini_parser::leaks_check(void (* callback)(const char*, long))
+	{
+		if (!callback) return;
+		callback("variable scopes", counters.variable_scope);
+		callback("current sections", counters.current_sections);
+		callback("templates", counters.templates);
+		counters = {};
 	}
 
 	struct variable_scope : std::enable_shared_from_this<variable_scope>
@@ -127,13 +145,27 @@ namespace utils
 			local_fallbacks.push_back(s.get());
 		}
 
-		std::shared_ptr<variable_scope> inherit(const creating_section* target_section = nullptr)
+		std::shared_ptr<variable_scope> inherit(const creating_section* target = nullptr)
 		{
-			return std::make_shared<variable_scope>(shared_from_this(), target_section);
+			return std::make_shared<variable_scope>(shared_from_this(), target);
 		}
 
-		variable_scope() : target_section(nullptr), parent(nullptr) {}
-		variable_scope(const std::shared_ptr<variable_scope>& parent, const creating_section* target_section) : target_section(target_section), parent(parent) {}
+		variable_scope()
+			: target_section(nullptr), parent(nullptr)
+		{
+			counters.variable_scope++;
+		}
+
+		variable_scope(std::shared_ptr<variable_scope> parent, const creating_section* target_section)
+			: target_section(target_section), parent(std::move(parent))
+		{
+			counters.variable_scope++;
+		}
+
+		~variable_scope()
+		{
+			counters.variable_scope--;
+		}
 
 		const variant* find(const std::string& name) const
 		{
@@ -208,7 +240,14 @@ namespace utils
 	{
 		path file;
 		const ini_parser_error_handler* error_handler{};
-		bool allow_lua{};
+		bool allow_includes = false;
+		bool allow_override = true;
+		bool allow_lua = true;
+		bool erase_referenced = true;
+
+		script_params() = default;
+		script_params(const script_params& other) = delete;
+		script_params& operator=(const script_params& other) = delete;
 	};
 
 	static const uint32_t SPECIAL_AUTOINCREMENT_LIMIT = 10000;
@@ -318,7 +357,7 @@ namespace utils
 
 	int lua_getsubtable(lua_State* L, int i, const char* name)
 	{
-		int abs_i = lua_absindex(L, i);
+		const auto abs_i = lua_absindex(L, i);
 		luaL_checkstack(L, 3, "not enough stack slots");
 		lua_pushstring(L, name);
 		lua_gettable(L, abs_i);
@@ -425,7 +464,7 @@ namespace utils
 		return false;
 	}
 
-	static void lua_import(const utils::path& name, bool is_shared, const path& file, const ini_parser_error_handler* handler)
+	static void lua_import(const path& name, bool is_shared, const path& file, const ini_parser_error_handler* handler)
 	{
 		auto key = name.filename().string();
 		std::transform(key.begin(), key.end(), key.begin(), tolower);
@@ -451,10 +490,10 @@ namespace utils
 	struct value_finalizer
 	{
 		std::vector<std::string>& dest;
-		script_params params;
+		const script_params* params;
 		bool process_values;
 
-		value_finalizer(std::vector<std::string>& dest, const script_params& params, bool process_values = true)
+		value_finalizer(std::vector<std::string>& dest, const script_params* params, bool process_values = true)
 			: dest(dest), params(params), process_values(process_values) { }
 
 		static void fix_word(std::string& result, const std::string& word)
@@ -509,15 +548,15 @@ namespace utils
 
 		void calculate(const std::string& expr, const std::string& prefix, const std::string& postfix) const
 		{
-			if (!params.allow_lua)
+			if (!params->allow_lua)
 			{
 				if (!prefix.empty() || !postfix.empty()) dest.push_back(prefix + postfix);
 				return;
 			}
-			lua_calculate(dest, fix_expression(expr), prefix, postfix, params.file, params.error_handler);
+			lua_calculate(dest, fix_expression(expr), prefix, postfix, params->file, params->error_handler);
 		}
 
-		void unwrap(std::string& value, const std::string& type) const
+		static void unwrap(std::string& value, const std::string& type)
 		{
 			const auto spec = value.find(type);
 			if (spec == std::string::npos) return;
@@ -526,8 +565,7 @@ namespace utils
 			if (end == std::string::npos) return;
 
 			const auto arg = value.substr(spec + type.size(), end - spec - type.size());
-
-			auto orig = value;
+			const auto orig = value;
 			value = orig.substr(0, spec);
 
 			if (type == SPECIAL_MISSING_VARIABLE)
@@ -602,9 +640,9 @@ namespace utils
 		special_mode mode{};
 
 		variable_info() : with_fallback(false) {}
-		variable_info(const std::string& name) : name(name), with_fallback(true) {}
-		variable_info(const std::string& name, int from, int to) : name(name), substr_from(from), substr_to(to), with_fallback(false) {}
-		variable_info(const std::string& name, special_mode mode) : name(name), with_fallback(false), mode(mode) {}
+		variable_info(std::string name) : name(std::move(name)), with_fallback(true) {}
+		variable_info(std::string name, int from, int to) : name(std::move(name)), substr_from(from), substr_to(to), with_fallback(false) {}
+		variable_info(std::string name, special_mode mode) : name(std::move(name)), with_fallback(false), mode(mode) {}
 
 		bool get_values(const std::shared_ptr<variable_scope>& include_vars, std::vector<std::string>& result)
 		{
@@ -655,9 +693,9 @@ namespace utils
 			{
 				dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
 			}
-			else if (dest.params.error_handler && (name.empty() || !isdigit(name[0])))
+			else if (dest.params->error_handler && (name.empty() || !isdigit(name[0])))
 			{
-				dest.params.error_handler->on_warning(dest.params.file, ("Missing variable: " + name).c_str());
+				dest.params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
 			}
 		}
 
@@ -672,7 +710,8 @@ namespace utils
 			s = "\"" + s + "\"";
 		}
 
-		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, const value_finalizer& dest, bool expr_mode)
+		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, const value_finalizer& dest,
+			const bool expr_mode)
 		{
 			std::vector<std::string> result;
 			if (!get_values(include_vars, result) && !expr_mode)
@@ -690,9 +729,9 @@ namespace utils
 				{
 					dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
 				}
-				if (!with_fallback && dest.params.error_handler)
+				if (!with_fallback && dest.params->error_handler)
 				{
-					dest.params.error_handler->on_warning(dest.params.file, ("Missing variable: " + name).c_str());
+					dest.params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
 				}
 				return;
 			}
@@ -760,7 +799,7 @@ namespace utils
 		return {vname};
 	}
 
-	static void substitute_variable(const std::string& value, const std::shared_ptr<variable_scope>& include_vars, const value_finalizer& dest, int stack,
+	static void substitute_variable(const std::string& value, const std::shared_ptr<variable_scope>& include_vars, const value_finalizer& dest, const int stack,
 		std::vector<std::string>* referenced_variables)
 	{
 		#if defined _DEBUG && defined USE_SIMPLE
@@ -787,7 +826,7 @@ namespace utils
 				return;
 			}
 
-			auto expr_mode = value.find(SPECIAL_CALCULATE) == 0;
+			const auto expr_mode = value.find(SPECIAL_CALCULATE) == 0;
 
 			{
 				// Concatenation with ${VariableName}
@@ -847,9 +886,16 @@ namespace utils
 		std::shared_ptr<variable_scope> template_scope;
 		std::vector<std::shared_ptr<section_template>> parents;
 
-		section_template(const std::string& name, const std::shared_ptr<variable_scope>& scope)
-			: name(name), template_scope(scope->inherit())
-		{ }
+		section_template(std::string name, const std::shared_ptr<variable_scope>& scope)
+			: name(std::move(name)), template_scope(scope->inherit())
+		{
+			counters.templates++;
+		}
+
+		~section_template()
+		{
+			counters.templates--;
+		}
 	};
 
 	struct current_section_info
@@ -864,14 +910,31 @@ namespace utils
 		// This would allow to overwrite values by template
 		std::unordered_map<section_template*, std::vector<std::string>> set_via_template;
 
-		explicit current_section_info(const std::shared_ptr<section_template>& target_template)
-			: target_template(target_template) { }
+		explicit current_section_info(std::shared_ptr<section_template> target_template)
+			: target_template(std::move(target_template))
+		{
+			counters.current_sections++;
+		}
 
-		current_section_info(const std::string& key)
-			: section_key(key) { }
+		current_section_info(std::string key)
+			: section_key(std::move(key))
+		{
+			counters.current_sections++;
+		}
 
-		current_section_info(const std::string& key, const std::vector<std::shared_ptr<section_template>>& templates)
-			: section_key(key), referenced_templates(templates) { }
+		current_section_info(std::string key, std::vector<std::shared_ptr<section_template>> templates)
+			: section_key(std::move(key)), referenced_templates(std::move(templates))
+		{
+			counters.current_sections++;
+		}
+
+		current_section_info(const current_section_info& other) = delete;
+		current_section_info& operator=(const current_section_info& other) = delete;
+
+		~current_section_info()
+		{
+			counters.current_sections--;
+		}
 
 		bool section_mode() const { return target_template == nullptr && !terminated; }
 		void terminate() { terminated = true; }
@@ -887,17 +950,13 @@ namespace utils
 		sections_map sections_map;
 		std::unordered_map<std::string, std::shared_ptr<section_template>> templates_map;
 		std::unordered_map<std::string, std::shared_ptr<section_template>> mixins_map;
-		bool allow_includes = false;
-		bool allow_override = true;
-		bool allow_lua = true;
-		bool erase_referenced = true;
 		std::vector<path> resolve_within;
 		std::vector<std::string> processed_files;
 		// section include_vars;
 		// variable_scope main_scope{nullptr};
-		path current_file;
+		script_params current_params;
 		const ini_parser_reader* reader{};
-		const ini_parser_error_handler* error_handler{};
+		uint64_t key_autoinc_index{};
 
 		bool get_template(const std::string& s, std::shared_ptr<section_template>& ref)
 		{
@@ -918,25 +977,28 @@ namespace utils
 		template <typename... Args>
 		void warn(const char* format, const Args& ... args) const
 		{
-			if (!error_handler) return;
+			if (!current_params.error_handler) return;
 			const int size = std::snprintf(nullptr, 0, format, warn_unwrap(args)...) + 1; // Extra space for '\0'
-			std::unique_ptr<char[]> buf(new char[ size ]);
+			const std::unique_ptr<char[]> buf(new char[ size ]);
 			std::snprintf(buf.get(), size, format, warn_unwrap(args)...);
-			error_handler->on_warning(current_file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
+			current_params.error_handler->on_warning(current_params.file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
 		}
 
 		template <typename... Args>
 		void error(const char* format, const Args& ... args) const
 		{
-			if (!error_handler) return;
+			if (!current_params.error_handler) return;
 			const int size = std::snprintf(nullptr, 0, format, warn_unwrap(args)...) + 1; // Extra space for '\0'
-			std::unique_ptr<char[]> buf(new char[ size ]);
+			const std::unique_ptr<char[]> buf(new char[ size ]);
 			std::snprintf(buf.get(), size, format, warn_unwrap(args)...);
-			error_handler->on_error(current_file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
+			current_params.error_handler->on_error(current_params.file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
 		}
 
 		ini_parser_data(bool allow_includes = false, const std::vector<path>& resolve_within = {})
-			: allow_includes(allow_includes), resolve_within(resolve_within) { }
+			: resolve_within(resolve_within)
+		{
+			current_params.allow_includes = allow_includes;
+		}
 
 		bool is_processed(const std::string& file_name, const size_t vars_fingerprint)
 		{
@@ -976,7 +1038,7 @@ namespace utils
 			return ret;
 		}
 
-		utils::path find_referenced(const std::string& file_name, const size_t vars_fingerprint)
+		path find_referenced(const std::string& file_name, const size_t vars_fingerprint)
 		{
 			if (is_processed(file_name, vars_fingerprint)) return {};
 
@@ -985,7 +1047,7 @@ namespace utils
 
 			for (auto i = -1, t = int(resolve_within.size()); i < t; i++)
 			{
-				const auto filename = (i == -1 ? current_file.parent_path() : resolve_within[i]) / inc;
+				const auto filename = (i == -1 ? current_params.file.parent_path() : resolve_within[i]) / inc;
 				if (!exists(filename)) continue;
 
 				const auto new_resolve_within = filename.parent_path();
@@ -1012,11 +1074,7 @@ namespace utils
 
 		value_finalizer get_value_finalizer(std::vector<std::string>& dest) const
 		{
-			script_params params;
-			params.file = current_file;
-			params.error_handler = error_handler;
-			params.allow_lua = allow_lua;
-			return {dest, params, true};
+			return {dest, &current_params, true};
 		}
 
 		variant substitute_variable_array(const variant& v, const std::shared_ptr<variable_scope>& sc, std::vector<std::string>& referenced_variables) const
@@ -1069,7 +1127,7 @@ namespace utils
 		{
 			if (repeats.size() > repeats_phase)
 			{
-				for (auto i = 0, n = repeats_phase >= repeats.size() ? 1 : repeats[repeats_phase]; i < n; i++)
+				for (auto i = 0, n = repeats[repeats_phase]; i < n; i++)
 				{
 					auto gen_scope = scope->inherit();
 					gen_scope->explicit_values[std::to_string(repeats_phase)] = i;
@@ -1168,7 +1226,7 @@ namespace utils
 				const auto dest = substitute_variable_array(inactive->second, sc, referenced_variables);
 				if (!dest.as<bool>()) return;
 			}
-			
+
 			for (const auto& v : t->values)
 			{
 				if (v.first.find("@ACTIVE") == 0) continue;
@@ -1180,7 +1238,7 @@ namespace utils
 				const auto is_generator_param = is_generator && v.first.find_first_of(':') != std::string::npos;
 				const auto is_mixin = v.first.find("@MIXIN") == 0;
 				const auto is_virtual = is_output || is_generator || is_mixin;
-				
+
 				auto& set_via_template = c.set_via_template[t.get()];
 				if (!is_virtual && c.target_section.find(v.first) != c.target_section.end()
 					&& std::find(set_via_template.begin(), set_via_template.end(), v.first) == set_via_template.end()
@@ -1243,7 +1301,7 @@ namespace utils
 					resolve_template(c, sc, t, referenced_variables);
 				}
 
-				if (erase_referenced)
+				if (current_params.erase_referenced)
 				{
 					for (const auto& v : referenced_variables)
 					{
@@ -1252,7 +1310,7 @@ namespace utils
 				}
 			}
 
-			if (erase_referenced)
+			if (current_params.erase_referenced)
 			{
 				for (const auto& v : c.referenced_variables)
 				{
@@ -1267,14 +1325,14 @@ namespace utils
 					c.target_section["ARGUMENTS"],
 					c.target_section["CODE"].as<std::string>(),
 					!c.target_section["PRIVATE"].as<bool>(),
-					current_file, error_handler);
+					current_params.file, current_params.error_handler);
 				c.target_section.clear();
 			}
 			else if (c.section_key == "USE")
 			{
 				const auto name = c.target_section["FILE"].as<std::string>();
-				const auto referenced = find_referenced(name, false);
-				if (exists(referenced)) lua_import(referenced, !c.target_section["PRIVATE"].as<bool>(), current_file, error_handler);
+				const auto referenced = find_referenced(name, 0);
+				if (exists(referenced)) lua_import(referenced, !c.target_section["PRIVATE"].as<bool>(), current_params.file, current_params.error_handler);
 				else error("Referenced file is missing: %s", name);
 				c.target_section.clear();
 			}
@@ -1283,7 +1341,7 @@ namespace utils
 				auto to_include = c.target_section.find("INCLUDE");
 				if (to_include != c.target_section.end())
 				{
-					const auto previous_file = current_file;
+					const auto previous_file = current_params.file;
 					auto include_scope = scope->inherit();
 
 					for (const auto& p : c.target_section)
@@ -1304,7 +1362,7 @@ namespace utils
 						parse_file(find_referenced(i, vars_fp), include_scope, vars_fp);
 					}
 
-					current_file = previous_file;
+					current_params.file = previous_file;
 					return;
 				}
 			}
@@ -1427,18 +1485,11 @@ namespace utils
 			return result;
 		}
 
-		static std::string convert_key_autoinc(const std::string& key)
+		std::string convert_key_autoinc(const std::string& key)
 		{
 			std::string group_us;
-			if (is_sequential(key, group_us))
-			{
-				static uint64_t index = 0;
-				return group_us + SPECIAL_KEY_AUTOINCREMENT + std::to_string(index++);
-			}
-			else
-			{
-				return key;
-			}
+			return is_sequential(key, group_us)
+				? group_us + SPECIAL_KEY_AUTOINCREMENT + std::to_string(key_autoinc_index++) : key;
 		}
 
 		std::vector<std::string> split_and_substitute(current_section_info* c, const std::string& value, const std::shared_ptr<variable_scope>& sc,
@@ -1461,7 +1512,7 @@ namespace utils
 		}
 
 		void parse_ini_finish(current_section_info& c, const std::string& data, const int non_space, std::string& key,
-			int& started, int& end_at, const std::shared_ptr<variable_scope>& scope)
+			const int started, const std::shared_ptr<variable_scope>& scope)
 		{
 			if (!c.section_mode() && !c.target_template) return;
 			if (key.empty()) return;
@@ -1474,11 +1525,11 @@ namespace utils
 			}
 			else
 			{
-				value = "";
+				value.clear();
 			}
 
 			const auto sc = prepare_section_scope(c, scope);
-			const auto new_key = allow_override || !c.referenced_templates.empty() || (c.section_mode()
+			const auto new_key = current_params.allow_override || !c.referenced_templates.empty() || (c.section_mode()
 				? c.target_section.find(key) == c.target_section.end()
 				: gen_find((*c.target_template).values, key) == (*c.target_template).values.end());
 			const auto splitted = split_and_substitute(&c, value, sc, &c.referenced_variables);
@@ -1495,7 +1546,7 @@ namespace utils
 				}
 				else if (key == "@ERASE_REFERENCED" && c.section_key == "@INIPP")
 				{
-					erase_referenced = variant(splitted).as<bool>();
+					current_params.erase_referenced = variant(splitted).as<bool>();
 				}
 				else if (c.section_key == "DEFAULTS")
 				{
@@ -1535,24 +1586,30 @@ namespace utils
 			return false;
 		}
 
-		void parse_ini_finish(std::vector<current_section_info>& cs, const std::string& data, const int non_space, std::string& key,
-			int& started, int& end_at, bool finish_section, const std::shared_ptr<variable_scope>& scope)
+		struct parse_status
+		{
+			std::string key;
+			int started = -1;
+			int end_at = -1;
+			bool started_solid{};
+		};
+
+		void parse_ini_finish(std::vector<std::unique_ptr<current_section_info>>& cs, const std::string& data, const int non_space,
+			parse_status& status, const bool finish_section, const std::shared_ptr<variable_scope>& scope)
 		{
 			for (auto& s : cs)
 			{
-				parse_ini_finish(s, data, non_space, key, started, end_at, scope);
+				parse_ini_finish(*s, data, non_space, status.key, status.started, scope);
 				if (finish_section)
 				{
-					parse_ini_section_finish(s, scope);
+					parse_ini_section_finish(*s, scope);
 				}
 			}
 
-			key.clear();
-			started = -1;
-			end_at = -1;
+			status = {};
 		}
 
-		static void add_template(std::vector<std::shared_ptr<section_template>>& templates, std::shared_ptr<section_template> t)
+		static void add_template(std::vector<std::shared_ptr<section_template>>& templates, const std::shared_ptr<section_template>& t)
 		{
 			templates.push_back(t);
 			for (const auto& p : t->parents)
@@ -1568,7 +1625,7 @@ namespace utils
 			return sections[sections.size() - 1].second;
 		}
 
-		void set_sections(std::vector<current_section_info>& cs, std::string& cs_keys, const std::shared_ptr<variable_scope>& scope)
+		void set_sections(std::vector<std::unique_ptr<current_section_info>>& cs, std::string& cs_keys, const std::shared_ptr<variable_scope>& scope)
 		{
 			std::string final_name;
 			auto separator = cs_keys.find_first_of(':');
@@ -1583,8 +1640,8 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back(current_section_info{final_name});
-					for (auto& s : cs) s.target_section["INCLUDE"] = file;
+					cs.push_back(std::make_unique<current_section_info>(final_name));
+					for (const auto& s : cs) s->target_section["INCLUDE"] = file;
 					return;
 				}
 
@@ -1592,8 +1649,8 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back(current_section_info{final_name});
-					for (auto& s : cs) s.target_section["NAME"] = file;
+					cs.push_back(std::make_unique<current_section_info>(final_name));
+					for (const auto& s : cs) s->target_section["NAME"] = file;
 					return;
 				}
 
@@ -1601,8 +1658,8 @@ namespace utils
 				{
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
-					cs.push_back(current_section_info{final_name});
-					for (auto& s : cs) s.target_section["FILE"] = file;
+					cs.push_back(std::make_unique<current_section_info>(final_name));
+					for (const auto& s : cs) s->target_section["FILE"] = file;
 					return;
 				}
 
@@ -1629,7 +1686,7 @@ namespace utils
 						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
 						{
 							trim_self(pieces[k], ", \t\r");
-							const auto found = templates_map.find(pieces[k]); 
+							const auto found = templates_map.find(pieces[k]);
 							if (found == templates_map.end())
 							{
 								templates_map[pieces[k]] = std::make_unique<section_template>(pieces[k], scope);
@@ -1641,7 +1698,7 @@ namespace utils
 							}
 						}
 					}
-					cs.push_back(current_section_info{templates_map[template_name]});
+					cs.push_back(std::make_unique<current_section_info>(templates_map[template_name]));
 				}
 				return;
 			}
@@ -1675,7 +1732,7 @@ namespace utils
 							}
 						}
 					}
-					cs.push_back(current_section_info{mixins_map[template_name]});
+					cs.push_back(std::make_unique<current_section_info>(mixins_map[template_name]));
 				}
 				return;
 			}
@@ -1695,17 +1752,17 @@ namespace utils
 
 			if (!referenced_templates.empty())
 			{
-				cs.push_back(current_section_info{final_name, referenced_templates});
+				cs.push_back(std::make_unique<current_section_info>(final_name, referenced_templates));
 				return;
 			}
 
 			for (const auto& cs_key : section_names)
 			{
-				cs.push_back(current_section_info{cs_key});
+				cs.push_back(std::make_unique<current_section_info>(cs_key));
 			}
 		}
 
-		static bool is_quote_working(const char* data, const int from, const int to, const bool allow_$)
+		static bool is_quote_working(const char* data, const int from, const int to, const bool allow_$ = true)
 		{
 			for (auto i = to - 1; i >= from; i--)
 			{
@@ -1719,13 +1776,11 @@ namespace utils
 
 		void parse_ini_values(const char* data, const int data_size, const std::shared_ptr<variable_scope>& parent_scope)
 		{
-			std::vector<current_section_info> cs;
+			std::vector<std::unique_ptr<current_section_info>> cs;
 			const auto scope = parent_scope ? parent_scope->inherit() : std::make_shared<variable_scope>();
 
-			auto started = -1;
+			parse_status status;
 			auto non_space = -1;
-			auto end_at = -1;
-			std::string key;
 
 			for (auto i = 0; i < data_size; i++)
 			{
@@ -1734,8 +1789,8 @@ namespace utils
 				{
 					case '[':
 					{
-						if (end_at != -1 || is_solid(data, started)) goto LAB_DEF;
-						parse_ini_finish(cs, data, non_space, key, started, end_at, true, scope);
+						if (status.end_at != -1 || status.started_solid) goto LAB_DEF;
+						parse_ini_finish(cs, data, non_space, status, true, scope);
 
 						const auto s = ++i;
 						if (s == data_size) break;
@@ -1748,27 +1803,28 @@ namespace utils
 
 					case '\n':
 					{
-						if (end_at != -1) goto LAB_DEF;
+						if (status.end_at != -1) goto LAB_DEF;
 						if (non_space > 0 && data[non_space] == '\\') goto LAB_DEF;
-						parse_ini_finish(cs, data, non_space, key, started, end_at, false, scope);
+						parse_ini_finish(cs, data, non_space, status, false, scope);
 						break;
 					}
 
 					case '=':
 					{
-						if (end_at != -1 || is_solid(data, started)) goto LAB_DEF;
-						if (started != -1 && key.empty() && !cs.empty())
+						if (status.end_at != -1 || status.started_solid) goto LAB_DEF;
+						if (status.started != -1 && status.key.empty() && !cs.empty())
 						{
-							key = std::string(&data[started], 1 + non_space - started);
-							started = -1;
-							end_at = -1;
+							status.key = std::string(&data[status.started], 1 + non_space - status.started);
+							status.started = -1;
+							status.started_solid = false;
+							status.end_at = -1;
 						}
 						break;
 					}
 
 					case '/':
 					{
-						if (end_at != -1 || is_solid(data, started)) goto LAB_DEF;
+						if (status.end_at != -1 || status.started_solid) goto LAB_DEF;
 						if (i + 1 < data_size && data[i + 1] == '/')
 						{
 							goto LAB_SEMIC;
@@ -1778,9 +1834,9 @@ namespace utils
 
 					case ';':
 					{
-						if (end_at != -1 || is_solid(data, started)) goto LAB_DEF;
+						if (status.end_at != -1 || status.started_solid) goto LAB_DEF;
 					LAB_SEMIC:
-						parse_ini_finish(cs, data, non_space, key, started, end_at, false, scope);
+						parse_ini_finish(cs, data, non_space, status, false, scope);
 						for (i++; i < data_size && data[i] != '\n'; i++) {}
 						break;
 					}
@@ -1788,25 +1844,31 @@ namespace utils
 					case '"':
 					case '\'':
 					{
-						if (!key.empty())
+						if (!status.key.empty())
 						{
-							if (end_at == -1)
+							if (status.end_at == -1)
 							{
-								if (started != -1 && !is_quote_working(data, started, i, true))
+								if (status.started != -1 && !is_quote_working(data, status.started, i))
 								{
 									goto LAB_DEF;
 								}
 
-								end_at = c;
-								if (started == -1)
+								status.end_at = c;
+								if (status.started == -1)
 								{
-									started = i;
+									status.started = i;
+									status.started_solid = false;
 									non_space = i;
 								}
 							}
-							else if (c == end_at)
+							else if (c == status.end_at)
 							{
-								end_at = -1;
+								if (data[i - 1] == '\\' && data[i - 2] != '\\')
+								{
+									goto LAB_DEF;
+								}
+
+								status.end_at = -1;
 							}
 						}
 					}
@@ -1817,9 +1879,10 @@ namespace utils
 						if (!is_whitespace(c))
 						{
 							non_space = i;
-							if (started == -1)
+							if (status.started == -1)
 							{
-								started = i;
+								status.started = i;
+								status.started_solid = c == 'd' && is_solid(data, i);
 							}
 						}
 						break;
@@ -1827,16 +1890,16 @@ namespace utils
 				}
 			}
 
-			parse_ini_finish(cs, data, non_space, key, started, end_at, true, scope);
+			parse_ini_finish(cs, data, non_space, status, true, scope);
 		}
 
 		void parse_file(const path& path, const std::shared_ptr<variable_scope>& scope, const size_t vars_fingerprint)
 		{
 			if (path.empty() || !reader) return;
 			mark_processed(path.filename().string(), vars_fingerprint);
-			current_file = path;
+			current_params.file = path;
 			const auto data = reader->read(path);
-			if (data.empty() && error_handler)
+			if (data.empty() && current_params.error_handler)
 			{
 				warn("File is missing or empty: %s", path.string());
 			}
@@ -1920,24 +1983,24 @@ namespace utils
 
 	const ini_parser& ini_parser::allow_lua(const bool value) const
 	{
-		data_->allow_lua = value;
+		data_->current_params.allow_lua = value;
 		return *this;
 	}
 
 	const ini_parser& ini_parser::parse(const char* data, const int data_size, const ini_parser_error_handler& error_handler) const
 	{
-		data_->error_handler = &error_handler;
+		data_->current_params.error_handler = &error_handler;
 		data_->parse_ini_values(data, data_size, {nullptr});
-		data_->error_handler = {};
+		data_->current_params.error_handler = {};
 		return *this;
 	}
 
 	const ini_parser& ini_parser::parse(const std::string& data, const ini_parser_error_handler& error_handler) const
 	{
-		data_->error_handler = &error_handler;
+		data_->current_params.error_handler = &error_handler;
 		data_->parse_ini_values(data.c_str(), int(data.size()), {nullptr});
 		data_->reader = {};
-		data_->error_handler = {};
+		data_->current_params.error_handler = {};
 		return *this;
 	}
 
@@ -1945,30 +2008,30 @@ namespace utils
 		const ini_parser_error_handler& error_handler) const
 	{
 		data_->reader = &reader;
-		data_->error_handler = &error_handler;
+		data_->current_params.error_handler = &error_handler;
 		data_->parse_ini_values(data, data_size, {nullptr});
 		data_->reader = {};
-		data_->error_handler = {};
+		data_->current_params.error_handler = {};
 		return *this;
 	}
 
 	const ini_parser& ini_parser::parse(const std::string& data, const ini_parser_reader& reader, const ini_parser_error_handler& error_handler) const
 	{
 		data_->reader = &reader;
-		data_->error_handler = &error_handler;
+		data_->current_params.error_handler = &error_handler;
 		data_->parse_ini_values(data.c_str(), int(data.size()), {nullptr});
 		data_->reader = {};
-		data_->error_handler = {};
+		data_->current_params.error_handler = {};
 		return *this;
 	}
 
 	const ini_parser& ini_parser::parse_file(const path& path, const ini_parser_reader& reader, const ini_parser_error_handler& error_handler) const
 	{
 		data_->reader = &reader;
-		data_->error_handler = &error_handler;
+		data_->current_params.error_handler = &error_handler;
 		data_->parse_file(path, {nullptr}, 0);
 		data_->reader = {};
-		data_->error_handler = {};
+		data_->current_params.error_handler = {};
 		return *this;
 	}
 
@@ -2053,7 +2116,7 @@ namespace utils
 			for (const auto& k : s.second)
 			{
 				auto& v = result[s.first][k.first] = json::array();
-				for (auto d : k.second.data())
+				for (const auto& d : k.second.data())
 				{
 					v.push_back(d);
 				}

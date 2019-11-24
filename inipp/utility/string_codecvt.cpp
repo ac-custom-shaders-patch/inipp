@@ -16,7 +16,7 @@ std::string utf16_to_utf8(const wchar_t* s, size_t len)
 	{
 		result.resize(len * 2);
 		auto r = WideCharToMultiByte(CP_UTF8, 0, s, int(len), &result[0], int(result.size()), nullptr, nullptr);
-		if (r == 0 && len != 0)
+		if (r == 0)
 		{
 			result.resize(WideCharToMultiByte(CP_UTF8, 0, s, int(len), nullptr, 0, nullptr, nullptr));
 			r = WideCharToMultiByte(CP_UTF8, 0, s, int(len), &result[0], int(result.size()), nullptr, nullptr);
@@ -45,7 +45,7 @@ std::wstring utf8_to_utf16(const char* s, size_t len)
 	{
 		result.resize(len);
 		auto r = MultiByteToWideChar(CP_UTF8, 0, s, int(len), &result[0], int(result.size()));
-		if (r == 0 && len != 0)
+		if (r == 0)
 		{
 			result.resize(MultiByteToWideChar(CP_UTF8, 0, s, int(len), nullptr, 0));
 			r = MultiByteToWideChar(CP_UTF8, 0, s, int(len), &result[0], int(result.size()));
