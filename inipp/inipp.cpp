@@ -56,9 +56,27 @@ struct simple_reader : utils::ini_parser_reader
 {
 	std::string read(const utils::path& filename) const override
 	{
-		std::ifstream file(filename.wstring());
 		std::stringstream buffer;
-		buffer << file.rdbuf();
+		buffer << std::ifstream(filename.wstring()).rdbuf();
+		return buffer.str();
+	}
+};
+
+struct caching_reader : utils::ini_parser_reader
+{
+	std::unordered_map<std::wstring, std::string> cache;
+
+	std::string read(const utils::path& filename) const override
+	{
+		const auto filename_w = filename.wstring();
+		const auto found = cache.find(filename_w);
+		if (found != cache.end())
+		{
+			return found->second;
+		}
+
+		std::stringstream buffer;
+		buffer << std::ifstream(filename_w).rdbuf();
 		return buffer.str();
 	}
 };
@@ -142,6 +160,33 @@ void do_debug_run()
 		if (clear) std::cout << u8"[2J[u";
 		std::cout << STYLE_QUEUE u8"• Running developing input:" STYLE_RESET << std::endl;
 		std::cout << utils::ini_parser(true, {}).allow_lua(true).parse_file(dev_input, simple_reader(), handler).finalize().to_ini();
+	}
+	
+	for (const auto& entry : std::experimental::filesystem::directory_iterator("performance"))
+	{
+		if (entry.path().extension() == ".ini" && entry.path().native().find(L"__") == std::wstring::npos)
+		{
+			auto filename = utils::path(entry.path().native());
+			if (filename.filename().string()[2] != '_') continue;
+
+			std::cout << STYLE_QUEUE u8"• Measuring performance of " << filename.filename_without_extension().string().substr(3) << u8"… " STYLE_RESET;
+			caching_reader reader;
+			if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
+			{
+				throw std::runtime_error("Unexpected");
+			}
+			const auto start = std::chrono::high_resolution_clock::now();
+			const auto run_count = 10;
+			for (auto i = 0; i < run_count; i++)
+			{
+				if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
+				{
+					throw std::runtime_error("Unexpected");
+				}
+			}
+			const auto time_taken = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
+			std::cout << STYLE_INFO << std::fixed << std::setprecision(2) << double(time_taken) / 1e6 / double(run_count) << u8" ms" STYLE_RESET << std::endl;
+		}
 	}
 }
 
