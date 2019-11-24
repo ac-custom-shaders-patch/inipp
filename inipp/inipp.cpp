@@ -39,6 +39,11 @@ static void show_usage(const std::string& name)
 		<< "      --version  output version information and exit\n\n"
 		<< "If no files given, reads INIpp file from STDIN and prints flatten result\n"
 		<< "in STDOUT, looking for included files in current directory\n\n"
+		<< "Exit status:\n"
+ 		<< " 0  if OK,\n"
+ 		<< " 1  if there are any warnings,\n"
+ 		<< " 2  if there are any parsing errors,\n"
+ 		<< " 3  if serious trouble (e.g., parser threw an exception).\n\n"
 		<< "Source code is available at: <https://github.com/ac-custom-shaders-patch/inipp>\n";
 }
 
@@ -87,17 +92,21 @@ struct error_handler : utils::ini_parser_error_handler
 {
 	bool quiet;
 	bool verbose;
+	bool warnings_reported{};
+	bool errors_reported{};
 
 	error_handler(bool quiet, bool verbose) : quiet(quiet), verbose(verbose) {}
 
-	void on_error(const utils::path& filename, const char* message) const override
+	void on_error(const utils::path& filename, const char* message) override
 	{
+		errors_reported = true;
 		if (quiet) return;
 		std::cerr << "Error in " << filename.filename() << ": " << message << '\n';
 	}
 
-	void on_warning(const utils::path& filename, const char* message) const override
+	void on_warning(const utils::path& filename, const char* message) override
 	{
+		warnings_reported = true;
 		if (quiet) return;
 		std::cerr << "Error in " << filename.filename() << ": " << message << '\n';
 	}
@@ -118,7 +127,7 @@ static std::string serialize(const utils::ini_parser& parser, bool output_format
 void do_debug_run()
 {
 	SetConsoleOutputCP(65001);
-	const auto handler = error_handler(false, true);
+	auto handler = error_handler(false, true);
 	const auto terminal_good = rang::rang_implementation::supportsColor()
 		&& rang::rang_implementation::isTerminal(std::cout.rdbuf())
 		&& rang::rang_implementation::supportsAnsi(std::cout.rdbuf());
@@ -278,7 +287,7 @@ int main(int argc, const char* argv[])
 			output_format, output_ini);
 		if (!destination.empty()) std::ofstream(destination) << processed;
 		else std::cout << processed;
-		return 0;
+		return handler.errors_reported ? 2 : handler.warnings_reported ? 1 : 0;
 	}
 
 	auto first = true;
@@ -303,14 +312,14 @@ int main(int argc, const char* argv[])
 		std::cout << processed;
 		first = false;
 	}
-
-	return 0;
+	
+	return handler.errors_reported ? 2 : handler.warnings_reported ? 1 : 0;
 	#ifndef THROW_STUFF
 	}
 	catch (std::exception const& e)
 	{
 		std::cerr << e.what() << '\n';
-		return 1;
+		return 3;
 	}
 	#endif
 }

@@ -647,11 +647,13 @@ KEY_0 = 1,1,1
 - If, when template is used, section name is set explicitly, it can be accessed with `$TARGET`;
 - You can use expressions when referring to sub-template in generator;
 - You can use index variables when setting parameters for sub-templates in generator;
+- There is a crappy thing added in very early stages, before quotes, and kept for compatibility, where you can use [Base64 representation of a PNG image without any quotes](https://github.com/ac-custom-shaders-patch/acc-extension-config/wiki/Post-processing-%E2%80%93-More-about-color-grading); please avoid using it if possible, regular quotes should be much better for that;
 - When editing configs for CSP, add `[__DEBUG] DUMP_FLATTEN_INI = 1` to see what config has unwrapped to (would be saved nearby; that’s not a feature of this preprocessor).
 
 # Plans
 
 - More tests to cover everything;
+- Something to simplify LUTs creation;
 - Something for expressions to work with colors;
 - Possibly, scripts could have read & write access to whole section.
 

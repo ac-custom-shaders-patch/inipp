@@ -13,8 +13,8 @@ namespace utils
 	struct ini_parser_error_handler
 	{
 		virtual ~ini_parser_error_handler() = default;
-		virtual void on_warning(const path& filename, const char* message) const {};
-		virtual void on_error(const path& filename, const char* message) const {};
+		virtual void on_warning(const path& filename, const char* message) {};
+		virtual void on_error(const path& filename, const char* message) {};
 	};
 
 	struct ini_parser
@@ -24,15 +24,21 @@ namespace utils
 		ini_parser(bool allow_includes, const std::vector<path>& resolve_within);
 		~ini_parser();
 
+		static ini_parser_error_handler& default_error_handler()
+		{
+			static ini_parser_error_handler ret;
+			return ret;
+		}
+
 		const ini_parser& allow_lua(bool value) const;
-		const ini_parser& parse(const char* data, int data_size, const ini_parser_error_handler& error_handler = ini_parser_error_handler{}) const;
-		const ini_parser& parse(const std::string& data, const ini_parser_error_handler& error_handler = ini_parser_error_handler{}) const;
+		const ini_parser& parse(const char* data, int data_size, ini_parser_error_handler& error_handler = default_error_handler()) const;
+		const ini_parser& parse(const std::string& data, ini_parser_error_handler& error_handler = default_error_handler()) const;
 		const ini_parser& parse(const char* data, int data_size, const ini_parser_reader& reader,
-			const ini_parser_error_handler& error_handler = ini_parser_error_handler{}) const;
+			ini_parser_error_handler& error_handler = default_error_handler()) const;
 		const ini_parser& parse(const std::string& data, const ini_parser_reader& reader,
-			const ini_parser_error_handler& error_handler = ini_parser_error_handler{}) const;
+			ini_parser_error_handler& error_handler = default_error_handler()) const;
 		const ini_parser& parse_file(const path& path, const ini_parser_reader& reader,
-			const ini_parser_error_handler& error_handler = ini_parser_error_handler{}) const;
+			ini_parser_error_handler& error_handler = default_error_handler()) const;
 		const ini_parser& finalize() const;
 		void finalize_end() const;
 

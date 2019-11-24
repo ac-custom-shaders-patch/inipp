@@ -248,7 +248,7 @@ namespace utils
 	struct script_params
 	{
 		path file;
-		const ini_parser_error_handler* error_handler{};
+		ini_parser_error_handler* error_handler{};
 		bool allow_includes = false;
 		bool allow_override = true;
 		bool allow_lua = true;
@@ -300,7 +300,7 @@ namespace utils
 
 	static void lua_calculate(std::vector<std::string>& dest, const std::string& expr,
 		const std::string& prefix, const std::string& postfix,
-		const path& file, const ini_parser_error_handler* handler)
+		const path& file, ini_parser_error_handler* handler)
 	{
 		const auto L = lua_get_state();
 		if (luaL_loadstring(L, expr.c_str()) || lua_pcall(L, 0, -1, 0))
@@ -337,7 +337,7 @@ namespace utils
 	}
 
 	static void lua_register_function(const std::string& name, const variant& args, const std::string& body,
-		bool is_shared, const path& file, const ini_parser_error_handler* handler)
+		bool is_shared, const path& file, ini_parser_error_handler* handler)
 	{
 		std::string args_line;
 		for (auto& arg : args.data())
@@ -471,7 +471,7 @@ namespace utils
 		return false;
 	}
 
-	static void lua_import(const path& name, bool is_shared, const path& file, const ini_parser_error_handler* handler)
+	static void lua_import(const path& name, bool is_shared, const path& file, ini_parser_error_handler* handler)
 	{
 		auto key = name.filename().string();
 		std::transform(key.begin(), key.end(), key.begin(), tolower);
@@ -730,7 +730,7 @@ namespace utils
 
 			for (auto i = 0U; i < s.size(); i++)
 			{
-				auto c = s[i];
+				const auto c = s[i];
 				if (is_space(c))
 				{
 					if (started) ended = true;
@@ -2127,7 +2127,7 @@ namespace utils
 		return *this;
 	}
 
-	const ini_parser& ini_parser::parse(const char* data, const int data_size, const ini_parser_error_handler& error_handler) const
+	const ini_parser& ini_parser::parse(const char* data, const int data_size, ini_parser_error_handler& error_handler) const
 	{
 		data_->current_params.error_handler = &error_handler;
 		data_->parse_ini_values(data, data_size, {nullptr});
@@ -2135,7 +2135,7 @@ namespace utils
 		return *this;
 	}
 
-	const ini_parser& ini_parser::parse(const std::string& data, const ini_parser_error_handler& error_handler) const
+	const ini_parser& ini_parser::parse(const std::string& data, ini_parser_error_handler& error_handler) const
 	{
 		data_->current_params.error_handler = &error_handler;
 		data_->parse_ini_values(data.c_str(), int(data.size()), {nullptr});
@@ -2145,7 +2145,7 @@ namespace utils
 	}
 
 	const ini_parser& ini_parser::parse(const char* data, const int data_size, const ini_parser_reader& reader,
-		const ini_parser_error_handler& error_handler) const
+		ini_parser_error_handler& error_handler) const
 	{
 		data_->reader = &reader;
 		data_->current_params.error_handler = &error_handler;
@@ -2155,7 +2155,7 @@ namespace utils
 		return *this;
 	}
 
-	const ini_parser& ini_parser::parse(const std::string& data, const ini_parser_reader& reader, const ini_parser_error_handler& error_handler) const
+	const ini_parser& ini_parser::parse(const std::string& data, const ini_parser_reader& reader, ini_parser_error_handler& error_handler) const
 	{
 		data_->reader = &reader;
 		data_->current_params.error_handler = &error_handler;
@@ -2165,7 +2165,7 @@ namespace utils
 		return *this;
 	}
 
-	const ini_parser& ini_parser::parse_file(const path& path, const ini_parser_reader& reader, const ini_parser_error_handler& error_handler) const
+	const ini_parser& ini_parser::parse_file(const path& path, const ini_parser_reader& reader, ini_parser_error_handler& error_handler) const
 	{
 		data_->reader = &reader;
 		data_->current_params.error_handler = &error_handler;
