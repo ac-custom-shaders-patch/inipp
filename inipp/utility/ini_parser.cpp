@@ -302,10 +302,6 @@ namespace utils
 		const std::string& prefix, const std::string& postfix,
 		const path& file, const ini_parser_error_handler* handler)
 	{
-		#ifdef _DEBUG
-		// std::cout << "Lua: `" << expr << "`\n";
-		#endif
-
 		const auto L = lua_get_state();
 		if (luaL_loadstring(L, expr.c_str()) || lua_pcall(L, 0, -1, 0))
 		{
@@ -317,7 +313,7 @@ namespace utils
 		if (lua_istable(L, -1))
 		{
 			lua_pushvalue(L, -1); // stack now contains: -1 => table
-			lua_pushnil(L);       // stack now contains: -1 => nil; -2 => table
+			lua_pushnil(L); // stack now contains: -1 => nil; -2 => table
 			while (lua_next(L, -2))
 			{
 				// stack now contains: -1 => value; -2 => key; -3 => table
@@ -509,7 +505,7 @@ namespace utils
 
 		static std::string fix_expression(const std::string& expr)
 		{
-			return "return (" + expr + ")";
+			return "return __conv_result(" + expr + ")";
 		}
 
 		void calculate(const std::string& expr, const std::string& prefix, const std::string& postfix) const

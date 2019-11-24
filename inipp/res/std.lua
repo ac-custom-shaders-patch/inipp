@@ -124,6 +124,25 @@ math.dot = function(x, y)
   return x * y
 end
 
+function __conv_result(arg)
+  function conv_val(arg)
+    if arg == nil then return '' end
+    if type(arg) == 'boolean' then return arg and '1' or '0' end
+    if type(arg) == 'table' then return arg end
+    return tostring(arg)
+  end
+
+  if type(rhs) == 'table' then
+    local ret = {}
+    for k, v in pairs(arg) do
+      ret[k] = conv_val(v)
+    end
+    return ret
+  end
+
+  return conv_val(arg)
+end
+
 abs = math.abs
 acos = math.acos
 asin = math.asin

@@ -1,5 +1,8 @@
 # INIpp
 
+[![License](https://img.shields.io/github/license/ac-custom-shaders-patch/inipp.svg?label=License&maxAge=86400)](./LICENSE.txt)
+[![Release](https://img.shields.io/github/release/ac-custom-shaders-patch/inipp.svg?label=Release&maxAge=60)](https://github.com/ac-custom-shaders-patch/inipp/releases/latest)
+
 INIpp is an extension for the good old INI format, designed specially for Custom Shaders Patch for Assetto Corsa, in an attempt to make preparing configs easier. A change there, a tweak here, and it became incompatible with regular parsers, and then things only got worse, to a point where my initial idea of making specialized parsers for Python and JavaScript became a bit unrealistic. Maybe later I’ll get back to it, once format is established, but for now, here is some sort of preprocessor, which is basically just a piece of code from CSP parsing those configs.
 
 In its main mode, INIpp preprocessor prints data in JSON format, since not all data could be represented with INI (look at “Quotes for specific values” section). There is a flag to change it behavior.
@@ -308,12 +311,87 @@ SHADER = ksPerPixelNM
 
 </details>
 
-## Templates, mixins, generators, expressions and functions
+## Expressions
 
+This one is simple. If you add “$” in front of a string, its value will be calculated with Lua interpreter. On its own, it’s not very helpful, but could be convenient once variables get involved.
+
+**Important:** variables substitution works differently for expressions. Strings get wrapped in quotes, missing values turn to `nil`, and if variable is a list, it’ll be passed as a table. Also, of course, if expression returns table, it’ll turn into a list. If variable has the length of 2, 3 or 4 and consists of nothing but valid numbers, it’ll be passed as a vector (the same table, but with working operators). Also, you can create new vectors in Lua using `vec2(x, y)`, `vec3(x, y, z)` and `vec4(x, y, z, w)`. Vectors also have methods `vec2(x, y):length()`, `vec2(x, y):normalize()` and `dot(vec2(x, y), vec2(z, w))`.
+
+<details><summary>Example</summary>
+
+#### √2
+
+```ini
+[TEST]
+SQUARE_ROOT_OF_TWO = $" sqrt(2) " ; `math.` functions copied to global scope
+```
+
+#### More useful example
+
+```ini
+[DEFAULTS]
+LightsIntensity = 2
+LightsDirection = 0.5, 0.5, 1
+
+; Basic maths and flags
+[LIGHT_...]
+INTENSITY = $" 2 * $LightsIntensity "
+ACTIVE = $" $LightsIntensity > 1 " ; boolean values will produce either 1 or 0
+
+; Strings, tables and vectors
+[LIGHT_...]
+DESCRIPTION = $" 'Light with the intensity: ' .. (2 * $LightsIntensity) "
+COLOR = $" { $LightsIntensity * 0.2, $LightsIntensity * 0.3, $LightsIntensity * 0.4 } " ; tables will turn into lists
+DIRECTION = $" ${LightsDirection:vec3}:normalize() " ; “:vec3” is not required, but it’ll make sure expression will work even if LightsDirection doesn’t have any numbers in it
+```
+
+</details>
+
+## Functions
 
 <details><summary>See more</summary>
 
+To simplify writing expressions, it’s possible to define functions. Here is an example:
+
+```ini
+; this function turns color from HEX or 0–255 format into regular normalized numbers
+[FUNCTION: ParseColor]
+ARGUMENTS = v  ; input arguments to be used in code below
+PRIVATE = 0    ; if set to 1, Lua state will be reset before loading next file
+CODE = '
+  if type(v) == "string" and v:sub(1, 1) == "#" then 
+    if #v == 7 then return { tonumber(v:sub(2, 3), 16) / 255, tonumber(v:sub(4, 5), 16) / 255, tonumber(v:sub(6, 7), 16) / 255 } end
+    if #v == 4 then return { tonumber(v:sub(2, 2), 16) / 15, tonumber(v:sub(3, 3), 16) / 15, tonumber(v:sub(4, 4), 16) / 15 } end
+    error("Invalid color: "..v)
+  end
+  if type(v) == "table" and #v == 3 and ( v[1] > 1 or v[2] > 1 or v[3] > 1 ) then return { v[1] / 255, v[2] / 255, v[3] / 255 } end
+  return v'
+  
+[DEFAULTS]
+ColorHex = #abcdef
+ColorHexShort = #f80
+ColorRgb = 255, 127, 0
+ColorRel = 1, 0.5, 0
+
+[TEST]
+VALUE1 = $" ParseColor( $ColorHex ) "       ; 0.67, 0.804, 0.937
+VALUE2 = $" ParseColor( $ColorHexShort ) "  ; 1.0, 0.53, 0.0
+VALUE3 = $" ParseColor( $ColorRgb ) "       ; 1.0, 0.5, 0.0
+VALUE4 = $" ParseColor( $ColorRel ) "       ; 1.0, 0.5, 0.0
+```
+
+Some common functions could be moved into an external Lua-file, which can be included like this:
+
+```ini
+[USE: common/functions_base.lua]  ; search is done the same way as for included INI-files
+PRIVATE = 0                       ; again, if set to 1, Lua state will be reset before loading next file
+```
+
+</details>
+
 ## Templates
+
+<details><summary>See more</summary>
 
 With templates, you can create your own type of section which will unwrap into something different. Like so:
 
@@ -394,7 +472,11 @@ SKINS = some_skin
 
 Isn’t that nice? And consider that in everyday usage, templates mess will be hidden in included files.
 
+</details>
+
 ## Mixins
+
+<details><summary>See more</summary>
 
 Mixins are similar to templates, but could be deactivated with a condition, making them helpful in some specific cases. For example, imagine a template receiving either list of meshes or materials, and it needs to set `MESHES = ${Meshes}` or `MATERIALS = ${Materials}`, but with a condition that empty list shouldn’t be set at all (`MESHES = ` could mean that thing should be applied to none meshes). With mixins, it’s an easy thing to set:
 
@@ -416,101 +498,11 @@ ACTIVE = $" ${Meshes:count} + ${Materials:count} "
 
 Not only templates, but any section can refer to a mixin. Also, mixins can include other mixins as well. Plus, `extends` keyword allows to build one mixins on top of others similar to templates.
 
-## Expressions
-
-This one is simple. If you add “$” in front of a string, its value will be calculated, thanks to Lua interpreter:
-
-```ini
-[TEST]
-SQUARE_ROOT_OF_TWO = $" sqrt(2) "
-```
-
-On its own, it’s not very helpful, but could be convenient once variables get involved:
-
-```ini
-[TEMPLATE: Material_CarPaint]
-@OUTPUT = SHADER_REPLACEMENT_0CARPAINT_...
-SHADER = smCarPaint
-MATERIALS = $CarPaintMaterial
-Reflectiveness = 0.8
-FresnelF0 = 0.2
-PROP_0 = fresnelMaxLevel, $Reflectiveness
-PROP_1 = fresnelC, $" $Reflectiveness * $FresnelF0 "
-PROP_2 = fresnelEXP, 5  ; that’s the correct value for this one in most cases, by the way, at least 
-                        ; with common approach to PBR rendering
-                        
-[Material_CarPaint]
-SKINS = some_very_reflective_skin
-CarPaintMaterial = Carpaint
-Reflectiveness = 0.8
-
-[Material_CarPaint]
-SKINS = not_that_reflective_skin
-CarPaintMaterial = Carpaint
-Reflectiveness = 0.4
-```
-
-And it generates this configuration:
-
-```ini
-[SHADER_REPLACEMENT_0CARPAINT_0]
-SHADER = smCarPaint
-MATERIALS = Carpaint
-SKINS = some_very_reflective_skin
-PROP_0 = fresnelMaxLevel, 0.8
-PROP_1 = fresnelC, 0.16
-PROP_2 = fresnelEXP, 5
-
-[SHADER_REPLACEMENT_0CARPAINT_1]
-SHADER = smCarPaint
-MATERIALS = Carpaint
-SKINS = not_that_reflective_skin
-PROP_0 = fresnelMaxLevel, 0.4
-PROP_1 = fresnelC, 0.08
-PROP_2 = fresnelEXP, 5
-```
-
-**Important:** variables substitution works differently for expressions. Strings get wrapped in quotes, missing values turn to `nil`, and if variable is a list, it’ll be passed as a table. Also, of course, if expression returns table, it’ll turn into a list. If variable has the length of 2, 3 or 4 and consists of nothing but valid numbers, it’ll be passed as a vector (the same table, but with working operators). Also, you can create new vectors in Lua using `vec2(x, y)`, `vec3(x, y, z)` and `vec4(x, y, z, w)`. Vectors also have methods `vec2(x, y):length()`, `vec2(x, y):normalize()` and `dot(vec2(x, y), vec2(z, w))`.
-
-## Functions
-
-To simplify writing expressions, it’s possible to define functions. Here is an example:
-
-```ini
-; this function turns color from HEX or 0–255 format into regular normalized numbers
-[FUNCTION: ParseColor]
-ARGUMENTS = v  ; input arguments to be used in code below
-PRIVATE = 0    ; if set to 1, Lua state will be reset before loading next file
-CODE = '
-  if type(v) == "string" and v:sub(1, 1) == "#" then 
-    if #v == 7 then return { tonumber(v:sub(2, 3), 16) / 255, tonumber(v:sub(4, 5), 16) / 255, tonumber(v:sub(6, 7), 16) / 255 } end
-    if #v == 4 then return { tonumber(v:sub(2, 2), 16) / 15, tonumber(v:sub(3, 3), 16) / 15, tonumber(v:sub(4, 4), 16) / 15 } end
-    error("Invalid color: "..v)
-  end
-  if type(v) == "table" and #v == 3 and ( v[1] > 1 or v[2] > 1 or v[3] > 1 ) then return { v[1] / 255, v[2] / 255, v[3] / 255 } end
-  return v'
-  
-[DEFAULTS]
-ColorHex = #abcdef
-ColorHexShort = #f80
-ColorRgb = 255, 127, 0
-ColorRel = 1, 0.5, 0
-
-[TEST]
-VALUE1 = $" ParseColor( $ColorHex ) "       ; 0.67, 0.804, 0.937
-VALUE2 = $" ParseColor( $ColorHexShort ) "  ; 1.0, 0.53, 0.0
-VALUE3 = $" ParseColor( $ColorRgb ) "       ; 1.0, 0.5, 0.0
-VALUE4 = $" ParseColor( $ColorRel ) "       ; 1.0, 0.5, 0.0
-```
-
-Some common functions could be moved into an external Lua-file, which can be included like this:
-
-```ini
-[USE: common/functions_base.lua]  ; search is done the same way as for included INI-files
-PRIVATE = 0                       ; again, if set to 1, Lua state will be reset before loading next file
-```
+</details>
 
 ## Generators
+
+<details><summary>See more</summary>
 
 That’s some really messy stuff, but templates can generate more than a single section. Here is a basic example:
 
@@ -659,6 +651,7 @@ KEY_0 = 1,1,1
 
 # Plans
 
+- More tests to cover everything;
 - Something for expressions to work with colors;
 - Possibly, scripts could have read & write access to whole section.
 
