@@ -298,14 +298,14 @@ namespace utils
 		return lua_state.ptr;
 	}
 
-	static void lua_calculate(std::vector<std::string>& dest, const std::string& expr,
+	static void lua_calculate(const std::string& key, std::vector<std::string>& dest, const std::string& expr,
 		const std::string& prefix, const std::string& postfix,
 		const path& file, ini_parser_error_handler* handler)
 	{
 		const auto L = lua_get_state();
 		if (luaL_loadstring(L, expr.c_str()) || lua_pcall(L, 0, -1, 0))
 		{
-			if (handler) handler->on_error(file, lua_tolstring(L, -1, nullptr));
+			if (handler) handler->on_error(file, (std::string(lua_tolstring(L, -1, nullptr)) + "\nKey: " + key + "\nCommand: " + expr).c_str());
 			if (!prefix.empty() || !postfix.empty()) dest.push_back(prefix + postfix);
 			return;
 		}
@@ -313,7 +313,7 @@ namespace utils
 		if (lua_istable(L, -1))
 		{
 			lua_pushvalue(L, -1); // stack now contains: -1 => table
-			lua_pushnil(L); // stack now contains: -1 => nil; -2 => table
+			lua_pushnil(L);       // stack now contains: -1 => nil; -2 => table
 			while (lua_next(L, -2))
 			{
 				// stack now contains: -1 => value; -2 => key; -3 => table
@@ -496,12 +496,13 @@ namespace utils
 
 	struct value_finalizer
 	{
+		std::string key;
 		std::vector<std::string>& dest;
 		const script_params* params;
 		bool process_values;
 
-		value_finalizer(std::vector<std::string>& dest, const script_params* params, bool process_values = true)
-			: dest(dest), params(params), process_values(process_values) { }
+		value_finalizer(std::string key, std::vector<std::string>& dest, const script_params* params, bool process_values = true)
+			: key(std::move(key)), dest(dest), params(params), process_values(process_values) { }
 
 		static std::string fix_expression(const std::string& expr)
 		{
@@ -515,7 +516,7 @@ namespace utils
 				if (!prefix.empty() || !postfix.empty()) dest.push_back(prefix + postfix);
 				return;
 			}
-			lua_calculate(dest, fix_expression(expr), prefix, postfix, params->file, params->error_handler);
+			lua_calculate(key, dest, fix_expression(expr), prefix, postfix, params->file, params->error_handler);
 		}
 
 		static void unwrap(std::string& value, const std::string& type)
@@ -599,6 +600,9 @@ namespace utils
 			vec2,
 			vec3,
 			vec4,
+			number,
+			boolean,
+			string,
 		};
 
 		std::string name;
@@ -619,29 +623,48 @@ namespace utils
 			const auto v = include_vars->find(name);
 			if (!v)
 			{
-				if (mode == special_mode::size || mode == special_mode::length)
+				switch (mode)
 				{
-					result.emplace_back("0");
-					return true;
+					case special_mode::size:
+					case special_mode::length:
+					case special_mode::exists:
+					case special_mode::number: result.emplace_back("0");
+						return true;
+					case special_mode::vec4: result.emplace_back("0");
+					case special_mode::vec3: result.emplace_back("0");
+					case special_mode::vec2: result.emplace_back("0");
+						result.emplace_back("0");
+						return true;
+					case special_mode::boolean: result.emplace_back("false");
+						return true;
+					case special_mode::string: result.emplace_back("");
+						return true;
+					case special_mode::none:
+					default: return false;
 				}
-				return false;
 			}
 
 			if (substr_to < 0 || substr_to == 0 && substr_from < 0) substr_to += int(v->data().size());
 			if (substr_from < 0) substr_from += int(v->data().size());
 
+			auto data_size = int(v->data().size());
+			if (data_size == 1 && v->data()[0].empty())
+			{
+				data_size = 0;
+			}
+
 			switch (mode)
 			{
 				case special_mode::size:
 				{
-					const auto count = std::min(substr_to - substr_from, int(v->data().size()) - substr_from);
+					const auto count = std::min(substr_to - substr_from, data_size - substr_from);
 					result.push_back(std::to_string(count));
 					break;
 				}
 				case special_mode::length:
 				{
 					size_t count = 0;
-					for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
+					for (auto j = substr_from, jt = data_size; j < jt && j < substr_to; j++)
 					{
 						count += v->data()[j].size();
 					}
@@ -650,16 +673,31 @@ namespace utils
 				}
 				case special_mode::exists:
 				{
-					result.push_back(substr_from < int(v->data().size()) && substr_from < substr_to ? "1" : "0");
+					result.push_back(substr_from < data_size && substr_from < substr_to ? "1" : "0");
+					break;
+				}
+				case special_mode::number:
+				{
+					result.push_back(std::to_string(v->as<double>(substr_from)));
+					break;
+				}
+				case special_mode::boolean:
+				{
+					result.push_back(v->as<bool>(substr_from) ? "true" : "false");
+					break;
+				}
+				case special_mode::string:
+				{
+					result.push_back(v->as<std::string>(substr_from));
 					break;
 				}
 				case special_mode::vec2:
 				case special_mode::vec3:
 				case special_mode::vec4:
 				{
-					const auto count = int(std::min(substr_to - substr_from, int(v->data().size()) - substr_from));
+					const auto count = int(std::min(substr_to - substr_from, data_size - substr_from));
 					const auto vec_size = int(2 + int(mode) - int(special_mode::vec2));
-					for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
+					for (auto j = substr_from, jt = data_size; j < jt && j < substr_to; j++)
 					{
 						if (is_number(v->data()[j]))
 						{
@@ -675,7 +713,7 @@ namespace utils
 
 					if (result.size() != 1 && count != vec_size)
 					{
-						dest.params->error_handler->on_warning(dest.params->file, ("Expected version with " + std::to_string(vec_size) + " values, got " 
+						dest.params->error_handler->on_warning(dest.params->file, ("Expected version with " + std::to_string(vec_size) + " values, got "
 							+ std::to_string(count) + ", variable " + name).c_str());
 					}
 
@@ -688,7 +726,7 @@ namespace utils
 				}
 				case special_mode::none:
 				{
-					for (auto j = substr_from, jt = int(v->data().size()); j < jt && j < substr_to; j++)
+					for (auto j = substr_from, jt = data_size; j < jt && j < substr_to; j++)
 					{
 						result.push_back(v->data()[j]);
 					}
@@ -780,11 +818,37 @@ namespace utils
 			return !exponent || exponent_end;
 		}
 
-		static void substitute_wrap(std::string& s)
+		static void wrap(std::string& s)
+		{
+			std::string r;
+			r.reserve(s.size() + 6);
+			r.push_back('"');
+			for (auto c : s)
+			{
+				switch (c)
+				{
+					case '\n': r.append("\\n");
+						break;
+					case '\r': r.append("\\r");
+						break;
+					case '\t': r.append("\\t");
+						break;
+					case '\b': r.append("\\b");
+						break;
+					case '"':
+					case '\\': r.push_back('\\');
+					default: r.push_back(c);
+				}
+			}
+			r.push_back('"');
+			s = r;
+		}
+
+		static void wrap_if_not_a_number(std::string& s)
 		{
 			if (!is_number(s))
 			{
-				s = "\"" + s + "\"";
+				wrap(s);
 			}
 		}
 
@@ -832,7 +896,14 @@ namespace utils
 				}
 				else if (result.size() == 1)
 				{
-					substitute_wrap(result[0]);
+					if (mode == special_mode::none)
+					{
+						wrap_if_not_a_number(result[0]);
+					}
+					else if (mode == special_mode::string)
+					{
+						wrap(result[0]);
+					}
 					s += result[0];
 				}
 				else if (result.size() <= 4 && all_numbers(result))
@@ -841,7 +912,7 @@ namespace utils
 					for (auto j = 0, jt = int(result.size()); j < jt; j++)
 					{
 						if (j) s += ",";
-						substitute_wrap(result[j]);
+						wrap_if_not_a_number(result[j]);
 						s += result[j];
 					}
 					s += ")";
@@ -852,7 +923,7 @@ namespace utils
 					for (auto j = 0, jt = int(result.size()); j < jt; j++)
 					{
 						if (j) s += ",";
-						substitute_wrap(result[j]);
+						wrap_if_not_a_number(result[j]);
 						s += result[j];
 					}
 					s += "}";
@@ -925,6 +996,9 @@ namespace utils
 				else if (pieces[size - 1] == "vec2") mode = variable_info::special_mode::vec2;
 				else if (pieces[size - 1] == "vec3") mode = variable_info::special_mode::vec3;
 				else if (pieces[size - 1] == "vec4") mode = variable_info::special_mode::vec4;
+				else if (pieces[size - 1] == "num" || pieces[size - 1] == "number") mode = variable_info::special_mode::number;
+				else if (pieces[size - 1] == "bool" || pieces[size - 1] == "boolean") mode = variable_info::special_mode::boolean;
+				else if (pieces[size - 1] == "str" || pieces[size - 1] == "string") mode = variable_info::special_mode::string;
 			}
 			if (from == 0)
 			{
@@ -957,7 +1031,7 @@ namespace utils
 			{
 				// Either $VariableName or ${VariableName}
 				std::vector<std::string> temp;
-				const auto finalizer = value_finalizer{temp, dest.params, false};
+				const auto finalizer = value_finalizer{var.name, temp, dest.params, false};
 				var.substitute(include_vars, finalizer);
 				for (const auto& v : temp)
 				{
@@ -977,7 +1051,7 @@ namespace utils
 					var = check_variable(value.substr(var_begin, var_end - var_begin + 1), dest);
 					if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
 					std::vector<std::string> temp;
-					const auto finalizer = value_finalizer{temp, dest.params, false};
+					const auto finalizer = value_finalizer{var.name, temp, dest.params, false};
 					var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end + 1), finalizer, expr_mode);
 					for (const auto& v : temp)
 					{
@@ -1003,7 +1077,7 @@ namespace utils
 						var = check_variable(value.substr(var_begin, var_end - var_begin), dest);
 						if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
 						std::vector<std::string> temp;
-						const auto finalizer = value_finalizer{temp, dest.params, false};
+						const auto finalizer = value_finalizer{var.name, temp, dest.params, false};
 						var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end), finalizer, expr_mode);
 						for (const auto& v : temp)
 						{
@@ -1212,17 +1286,17 @@ namespace utils
 			return {};
 		}
 
-		value_finalizer get_value_finalizer(std::vector<std::string>& dest) const
+		value_finalizer get_value_finalizer(const std::string& key, std::vector<std::string>& dest) const
 		{
-			return {dest, &current_params, true};
+			return {key, dest, &current_params, true};
 		}
 
-		variant substitute_variable_array(const variant& v, const std::shared_ptr<variable_scope>& sc, std::vector<std::string>& referenced_variables) const
+		variant substitute_variable_array(const std::string& key, const variant& v, const std::shared_ptr<variable_scope>& sc, std::vector<std::string>& referenced_variables) const
 		{
 			variant dest;
 			for (const auto& piece : v.data())
 			{
-				substitute_variable(piece, sc, get_value_finalizer(dest.data()), 0, &referenced_variables);
+				substitute_variable(piece, sc, get_value_finalizer(key, dest.data()), 0, &referenced_variables);
 			}
 			return dest;
 		}
@@ -1255,7 +1329,7 @@ namespace utils
 					{
 						gen_scope = scope->inherit();
 					}
-					gen_scope->explicit_values[param_key] = substitute_variable_array(v0.second, gen_scope, referenced_variables);
+					gen_scope->explicit_values[param_key] = substitute_variable_array(param_key, v0.second, gen_scope, referenced_variables);
 				}
 			}
 			parse_ini_section_finish(generated, gen_scope, &referenced_variables);
@@ -1298,7 +1372,7 @@ namespace utils
 					auto set_value = item.substr(set + 1);
 					trim_self(set_key);
 					trim_self(set_value);
-					scope_own->explicit_values[set_key] = split_and_substitute(nullptr, set_value, scope_own, &referenced_variables);
+					scope_own->explicit_values[set_key] = split_and_substitute(set_key, nullptr, set_value, scope_own, &referenced_variables);
 					continue;
 				}
 			}
@@ -1363,7 +1437,7 @@ namespace utils
 			const auto inactive = gen_find(t->values, "@ACTIVE");
 			if (inactive != t->values.end())
 			{
-				const auto dest = substitute_variable_array(inactive->second, sc, referenced_variables);
+				const auto dest = substitute_variable_array("@ACTIVE", inactive->second, sc, referenced_variables);
 				if (!dest.as<bool>()) return;
 			}
 
@@ -1387,7 +1461,7 @@ namespace utils
 					continue;
 				}
 
-				auto dest = substitute_variable_array(v.second, sc, referenced_variables);
+				auto dest = substitute_variable_array(v.first, v.second, sc, referenced_variables);
 				if (is_output)
 				{
 					c.section_key = dest.as<std::string>();
@@ -1632,7 +1706,7 @@ namespace utils
 				? group_us + SPECIAL_KEY_AUTOINCREMENT + std::to_string(key_autoinc_index++) : key;
 		}
 
-		std::vector<std::string> split_and_substitute(current_section_info* c, const std::string& value, const std::shared_ptr<variable_scope>& sc,
+		std::vector<std::string> split_and_substitute(const std::string& key, current_section_info* c, const std::string& value, const std::shared_ptr<variable_scope>& sc,
 			std::vector<std::string>* referenced_variables) const
 		{
 			std::vector<std::string> value_splitted;
@@ -1644,7 +1718,7 @@ namespace utils
 				}
 				else
 				{
-					substitute_variable(value_piece, sc, get_value_finalizer(value_splitted), 0,
+					substitute_variable(value_piece, sc, get_value_finalizer(key, value_splitted), 0,
 						referenced_variables ? referenced_variables : c ? &c->referenced_variables : nullptr);
 				}
 			}
@@ -1672,7 +1746,7 @@ namespace utils
 			const auto new_key = current_params.allow_override || !c.referenced_templates.empty() || (c.section_mode()
 				? c.target_section.find(key) == c.target_section.end()
 				: gen_find((*c.target_template).values, key) == (*c.target_template).values.end());
-			const auto splitted = split_and_substitute(&c, value, sc, &c.referenced_variables);
+			const auto splitted = split_and_substitute(key, &c, value, sc, &c.referenced_variables);
 
 			if (c.section_mode())
 			{

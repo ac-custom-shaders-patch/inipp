@@ -10,10 +10,10 @@ function vecType(D){
   }
 
   function op2(op, X){
-    return `${op} = function (lhs, rhs) \
-if type(rhs) ~= 'table' then return vec${D}(${repeat(x => `lhs[${x + 1}]${X}rhs`)}) \
-elseif type(lhs) ~= 'table' then return vec${D}(${repeat(x => `lhs${X}rhs[${x + 1}]`)}) \
-else return vec${D}(${repeat(x => `lhs[${x + 1}]${X}(rhs[${x + 1}] ~= nil and rhs[${x + 1}] or 0)`)}) end \
+    return `${op} = function (L, R) \
+if type(R) ~= 'table' then return vec${D}(${repeat(x => `L[${x + 1}]${X}R`)}) \
+elseif type(L) ~= 'table' then return vec${D}(${repeat(x => `L${X}R[${x + 1}]`)}) \
+else return vec${D}(${repeat(x => `L[${x + 1}]${X}(R[${x + 1}] and R[${x + 1}] or 0)`)}) end \
 end`;
   }
 
@@ -26,10 +26,10 @@ end`;
   ${op2('__pow', '^')},
   ${op2('__lt', '<')},
   ${op2('__le', '<=')},
-  __eq = function (lhs, rhs)
-    if type(rhs) ~= 'table' then return ${repeat(x => `lhs[${x + 1}] == rhs`, ' and ')}
-    elseif type(lhs) ~= 'table' then return ${repeat(x => `lhs == rhs[${x + 1}]`, ' and ')}
-    else return ${repeat(x => `lhs[${x + 1}] == (rhs[${x + 1}] ~= nil and rhs[${x + 1}] or 0)`, ' and ')} end
+  __eq = function (L, R)
+    if type(R) ~= 'table' then return ${repeat(x => `L[${x + 1}] == R`, ' and ')}
+    elseif type(L) ~= 'table' then return ${repeat(x => `L == R[${x + 1}]`, ' and ')}
+    else return ${repeat(x => `L[${x + 1}] == (R[${x + 1}] and R[${x + 1}] or 0)`, ' and ')} end
   end,
   __len = function (s) return s:length() end,
   __unm = function (s) return vec${D}(${repeat(x => `-s[${x + 1}]`)}) end,
@@ -38,10 +38,22 @@ end`;
     if key == 'len' or key == 'length' then return function (s) return math.sqrt(${repeat(x => `s[${x + 1}]^2`, '+')}) end end
     if key == 'normalize' then return function (s) return s / s:length() end end
     if key == 'normalizeSelf' then return function (s) local m = 1 / s:length() ${repeat(x => `s[${x + 1}] = s[${x + 1}] * m`, ' ')} end end
-    if key == 'dot' then return function (lhs, rhs)
-      if type(rhs) ~= 'table' then return ${repeat(x => `lhs[${x + 1}] * rhs`, ' + ')}
-      elseif type(lhs) ~= 'table' then return ${repeat(x => `lhs * rhs[${x + 1}]`, ' + ')}
-      else return ${repeat(x => `lhs[${x + 1}] * (rhs[${x + 1}] ~= nil and rhs[${x + 1}] or 0)`, ' + ')} end
+    if key == 'dot' then return function (L, R)
+      if type(R) ~= 'table' then return ${repeat(x => `L[${x + 1}] * R`, ' + ')}
+      else return ${repeat(x => `L[${x + 1}] * (R[${x + 1}] and R[${x + 1}] or 0)`, ' + ')} end
+    end end
+    if key == 'clamp' then return function (L, min, max)
+      return vec${D}(${repeat(x => `math.clamp(L[${x + 1}], 
+        type(min) == 'table' and (min[${x + 1}] and min[${x + 1}] or 0) or min, 
+        type(max) == 'table' and (max[${x + 1}] and max[${x + 1}] or 0) or max)`)})
+    end end
+    if key == 'lerp' then return function (L, R, s)
+      return vec${D}(${repeat(x => `math.lerp(L[${x + 1}], 
+        type(R) == 'table' and (R[${x + 1}] and R[${x + 1}] or 0) or R, 
+        type(s) == 'table' and (s[${x + 1}] and s[${x + 1}] or 0) or s)`)})
+    end end
+    if key == 'sign' then return function (L)
+      return vec${D}(${repeat(x => `math.sign(L[${x + 1}])`)})
     end end
     if key == 'x' or key == 'X' then return s[1] end
     if key == 'y' or key == 'Y' then return s[2] end
@@ -82,6 +94,13 @@ let aliases = {
   sqrt: 'math.sqrt',
   tan: 'math.tan',
   dot: 'math.dot',
+  clamp: 'math.clamp',
+  saturate: 'math.saturate',
+  sign: 'math.sign',
+  lerp: 'math.lerp',
+  lerpInvSat: 'math.lerpInvSat',
+  smoothstep: 'math.smoothstep',
+  smootherstep: 'math.smootherstep',
 };
 
 let code = [];
@@ -93,6 +112,35 @@ code.push(`math.dot = function(x, y)
   if type(y) == 'table' then return y:dot(x) end 
   return x * y
 end
+
+math.clamp = function(x, min, max)
+  if type(x) == 'table' then return x:clamp(min, max) end 
+  if x < min then return min end
+  if x > max then return max end
+  return x
+end
+
+math.saturate = function(x) return math.clamp(x, 0, 1) end
+
+math.sign = function(x) 
+  if type(x) == 'table' then return x:sign() end 
+  if x < 0 then 
+    return -1
+  elseif x > 0 then 
+    return 1
+  else 
+    return 0 
+  end 
+end
+
+math.lerp = function(x, y, s)
+  if type(x) == 'table' then return x:lerp(y, s) end 
+  return x * (1 - s) + y * s
+end
+
+math.lerpInvSat = function (s, min, max) return math.saturate((s - min) / (max - min)) end
+math.smoothstep = function (x) return x * x * (3 - 2 * x) end
+math.smootherstep = function (x) return x * x * x * (x * (x * 6 - 15) + 10) end
 `);
 
 code.push(`function __conv_result(arg)
@@ -103,7 +151,7 @@ code.push(`function __conv_result(arg)
     return tostring(arg)
   end
 
-  if type(rhs) == 'table' then
+  if type(R) == 'table' then
     local ret = {}
     for k, v in pairs(arg) do
       ret[k] = conv_val(v)
@@ -119,11 +167,17 @@ for (let n in aliases){
   code.push(`${n} = ${aliases[n]}`);
 }
 
-fs.writeFileSync('std.lua', code.join('\n'));
+let minified = code.join('\n')
+  .replace(/\s\s+/g, ' ')
+  .replace(/\s([=~]=|[<>*+=-])\s/g, '$1')
+  .replace(/([,)'\]{}])\s/g, '$1') 
+  .replace(/\s([('\[{}])/g, '$1');
+
+fs.writeFileSync('std.lua', minified);
 fs.writeFileSync('../utility/ini_parser_lua_lib.h', `#pragma once
 
 namespace utils
 {
-\tconst char* LUA_STD_LUB = R""(` + code.join('\n') + `)"";
+\tconst char* LUA_STD_LUB = R""(` + minified + `)"";
 }`);
 $['D:/Applications/Cygwin/bin/lua.exe']('test.lua');

@@ -23,3 +23,8 @@ print(-vec2(1, 2))
 print(-vec2(1, 2) == vec4(-1, -2, 3, 4))
 print(-vec4(1, 2, -3, -4) == vec4(-1, -2, 3, 4))
 print((vec4(2, 3, 4, 5) - 1) == vec4(1, 2, 3, 4))
+
+print(saturate(vec2(0.5, 1.1)))
+print(clamp(vec2(0.5, 1.1), vec2(0.7, 0.9), 0.95))
+print(vec4(-1, -2, 3, 4):sign())
+print(lerp(vec2(0.5, 1.1), vec2(0.7, 0.9), 0.95))
