@@ -844,11 +844,11 @@ namespace utils
 	{
 		std::string name;
 		template_section values;
-		std::shared_ptr<variable_scope> scope;
+		std::shared_ptr<variable_scope> template_scope;
 		std::vector<std::shared_ptr<section_template>> parents;
 
 		section_template(const std::string& name, const std::shared_ptr<variable_scope>& scope)
-			: name(name), scope(scope->inherit())
+			: name(name), template_scope(scope->inherit())
 		{ }
 	};
 
@@ -860,6 +860,9 @@ namespace utils
 		std::shared_ptr<section_template> target_template{};
 		std::vector<std::shared_ptr<section_template>> referenced_templates;
 		std::vector<std::string> referenced_variables;
+
+		// This would allow to overwrite values by template
+		std::unordered_map<section_template*, std::vector<std::string>> set_via_template;
 
 		explicit current_section_info(const std::shared_ptr<section_template>& target_template)
 			: target_template(target_template) { }
@@ -887,11 +890,12 @@ namespace utils
 		bool allow_includes = false;
 		bool allow_override = true;
 		bool allow_lua = true;
+		bool erase_referenced = true;
 		std::vector<path> resolve_within;
 		std::vector<std::string> processed_files;
 		// section include_vars;
 		// variable_scope main_scope{nullptr};
-		utils::path current_file;
+		path current_file;
 		const ini_parser_reader* reader{};
 		const ini_parser_error_handler* error_handler{};
 
@@ -1078,7 +1082,7 @@ namespace utils
 			}
 		}
 
-		void set_inline_values(std::shared_ptr<variable_scope>& scope_own, const std::shared_ptr<variable_scope>& scope, 
+		void set_inline_values(std::shared_ptr<variable_scope>& scope_own, const std::shared_ptr<variable_scope>& scope,
 			const variant& trigger, const int index, std::vector<std::string>& referenced_variables)
 		{
 			for (auto i = index; i < int(trigger.data().size()); i++)
@@ -1141,7 +1145,7 @@ namespace utils
 			auto sc = scope->inherit(&c.target_section);
 			for (const auto& t : c.referenced_templates)
 			{
-				sc->fallback(t->scope);
+				sc->fallback(t->template_scope);
 			}
 
 			const auto target_found = sc->explicit_values.find("TARGET");
@@ -1156,7 +1160,7 @@ namespace utils
 			std::vector<std::string>& referenced_variables)
 		{
 			const auto sc = scope->inherit();
-			sc->fallback(t->scope);
+			sc->fallback(t->template_scope);
 
 			const auto inactive = gen_find(t->values, "@ACTIVE");
 			if (inactive != t->values.end())
@@ -1164,10 +1168,7 @@ namespace utils
 				const auto dest = substitute_variable_array(inactive->second, sc, referenced_variables);
 				if (!dest.as<bool>()) return;
 			}
-
-			// This would allow to overwrite values by template
-			std::vector<std::string> set_via_template;
-
+			
 			for (const auto& v : t->values)
 			{
 				if (v.first.find("@ACTIVE") == 0) continue;
@@ -1179,7 +1180,8 @@ namespace utils
 				const auto is_generator_param = is_generator && v.first.find_first_of(':') != std::string::npos;
 				const auto is_mixin = v.first.find("@MIXIN") == 0;
 				const auto is_virtual = is_output || is_generator || is_mixin;
-
+				
+				auto& set_via_template = c.set_via_template[t.get()];
 				if (!is_virtual && c.target_section.find(v.first) != c.target_section.end()
 					&& std::find(set_via_template.begin(), set_via_template.end(), v.first) == set_via_template.end()
 					|| is_generator_param)
@@ -1240,15 +1242,22 @@ namespace utils
 				{
 					resolve_template(c, sc, t, referenced_variables);
 				}
-				for (const auto& v : referenced_variables)
+
+				if (erase_referenced)
 				{
-					c.target_section.erase(v);
+					for (const auto& v : referenced_variables)
+					{
+						c.target_section.erase(v);
+					}
 				}
 			}
 
-			for (const auto& v : c.referenced_variables)
+			if (erase_referenced)
 			{
-				c.target_section.erase(v);
+				for (const auto& v : c.referenced_variables)
+				{
+					c.target_section.erase(v);
+				}
 			}
 
 			if (c.section_key == "FUNCTION")
@@ -1444,7 +1453,7 @@ namespace utils
 				}
 				else
 				{
-					substitute_variable(value_piece, sc, get_value_finalizer(value_splitted), 0, 
+					substitute_variable(value_piece, sc, get_value_finalizer(value_splitted), 0,
 						referenced_variables ? referenced_variables : c ? &c->referenced_variables : nullptr);
 				}
 			}
@@ -1483,6 +1492,10 @@ namespace utils
 				else if (key.find("@GENERATOR") == 0)
 				{
 					resolve_generator(nullptr, "", splitted, sc, c.referenced_variables);
+				}
+				else if (key == "@ERASE_REFERENCED" && c.section_key == "@INIPP")
+				{
+					erase_referenced = variant(splitted).as<bool>();
 				}
 				else if (c.section_key == "DEFAULTS")
 				{
@@ -1616,7 +1629,7 @@ namespace utils
 						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
 						{
 							trim_self(pieces[k], ", \t\r");
-							const auto found = templates_map.find(pieces[k]);
+							const auto found = templates_map.find(pieces[k]); 
 							if (found == templates_map.end())
 							{
 								templates_map[pieces[k]] = std::make_unique<section_template>(pieces[k], scope);
@@ -1892,41 +1905,6 @@ namespace utils
 			{
 				sections_map[p.first] = resolve_sequential_keys(p.second);
 			}
-
-			/*for (const auto& p : sections)
-			{
-				const auto index = p.first.find(":$SEQ:");
-				if (index != std::string::npos) goto Remap;
-			}
-			return;
-
-		Remap:
-			std::vector<std::pair<std::string, section>> elems(sections.begin(), sections.end());
-			std::sort(elems.begin(), elems.end(), sort_sections);
-
-			sections_list renamed;
-			for (const auto& p : elems)
-			{
-				const auto index = p.first.find(":$SEQ:");
-				if (index == std::string::npos)
-				{
-					renamed[p.first] = p.second;
-					continue;
-				}
-
-				auto prefix = p.first.substr(0, index);
-				for (auto i = 0; i < 100000; i++)
-				{
-					auto candidate = prefix + std::to_string(i);
-					if (sections.find(candidate) == sections.end()
-						&& renamed.find(candidate) == renamed.end())
-					{
-						renamed[candidate] = p.second;
-						break;
-					}
-				}
-			}
-			sections = renamed;*/
 		}
 	};
 
