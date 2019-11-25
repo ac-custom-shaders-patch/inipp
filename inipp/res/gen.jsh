@@ -64,7 +64,12 @@ end`;
 }
 
 function vec${D}(${args()})
-  local t = {${args()}}
+  local t = {}
+  ${repeat(x => `if type(a${x}) == 'table' then
+    for k, v in pairs(a${x}) do
+      t[#t + 1] = v
+    end
+  else t[#t + 1] = a${x} end`, ' ')}
   setmetatable(t, __vec${D}_mt)
   return t
 end
@@ -147,15 +152,24 @@ code.push(`function __conv_result(arg)
   function conv_val(arg)
     if arg == nil then return '' end
     if type(arg) == 'boolean' then return arg and '1' or '0' end
+    if type(arg) == 'number' then return arg end
     if type(arg) == 'table' then return arg end
     return tostring(arg)
   end
 
-  if type(R) == 'table' then
-    local ret = {}
-    for k, v in pairs(arg) do
-      ret[k] = conv_val(v)
+  function conv_table(ret, arg)
+    if type(arg) == 'table' then
+      for k, v in pairs(arg) do
+        conv_table(ret, v)
+      end
+    elseif type(arg) ~= 'function' then
+      ret[#ret + 1] = conv_val(arg)
     end
+  end
+
+  if type(arg) == 'table' then
+    local ret = {}
+    conv_table(ret, arg)
     return ret
   end
 
