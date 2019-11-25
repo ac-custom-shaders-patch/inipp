@@ -1344,7 +1344,7 @@ namespace utils
 				for (auto i = 0, n = repeats[repeats_phase]; i < n; i++)
 				{
 					auto gen_scope = scope->inherit();
-					gen_scope->explicit_values[std::to_string(repeats_phase + 1)] = i;
+					gen_scope->explicit_values[std::to_string(repeats_phase + 1)] = i + 1;
 					resolve_generator_iteration(t, key, section_key, tpl, gen_scope, referenced_variables, repeats, repeats_phase + 1);
 				}
 			}
