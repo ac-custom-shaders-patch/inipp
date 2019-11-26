@@ -175,6 +175,10 @@ code.push(`function __conv_result(arg)
 
   return conv_val(arg)
 end
+
+function discard()
+  error('__discardError__')
+end
 `);
 
 for (let n in aliases){

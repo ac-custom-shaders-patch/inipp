@@ -95,8 +95,14 @@ namespace utils
 		variant(std::initializer_list<T> values)
 			: variant(values.begin(), values.size()) { }
 
+		bool empty() const { return data().empty(); }
 		std::vector<std::string>& data();
 		const std::vector<std::string>& data() const;
+
+		auto begin() { return data().begin(); }
+		auto begin() const { return data().begin(); }
+		auto end() { return data().end(); }
+		auto end() const { return data().end(); }
 
 		template <typename T>
 		T as(size_t i = 0) const

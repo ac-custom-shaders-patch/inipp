@@ -95,8 +95,9 @@ namespace utils
 		return c == '_' || isupper(c) || islower(c) || isdigit(c);
 	}
 
-	static bool is_identifier(const std::string& s)
+	static bool is_identifier(const std::string& s, bool allow_leading_zero = true)
 	{
+		if (s.empty() || !allow_leading_zero && isdigit(s[0])) return false;
 		for (auto i : s)
 		{
 			if (!is_identifier_part(i)) return false;
@@ -298,15 +299,21 @@ namespace utils
 		return lua_state.ptr;
 	}
 
-	static void lua_calculate(const std::string& key, std::vector<std::string>& dest, const std::string& expr,
+	static void lua_calculate(const std::string& key, bool& include_value, variant& dest, const std::string& expr,
 		const std::string& prefix, const std::string& postfix,
 		const path& file, ini_parser_error_handler* handler)
 	{
 		const auto L = lua_get_state();
 		if (luaL_loadstring(L, expr.c_str()) || lua_pcall(L, 0, -1, 0))
 		{
-			if (handler) handler->on_error(file, (std::string(lua_tolstring(L, -1, nullptr)) + "\nKey: " + key + "\nCommand: " + expr).c_str());
-			if (!prefix.empty() || !postfix.empty()) dest.push_back(prefix + postfix);
+			const auto error_msg = std::string(lua_tolstring(L, -1, nullptr));
+			if (error_msg.find("__discardError__") != std::string::npos)
+			{
+				include_value = false;
+				return;
+			}
+			if (handler) handler->on_error(file, (error_msg + "\nKey: " + key + "\nCommand: " + expr).c_str());
+			if (!prefix.empty() || !postfix.empty()) dest.data().push_back(prefix + postfix);
 			return;
 		}
 
@@ -319,7 +326,7 @@ namespace utils
 				// stack now contains: -1 => value; -2 => key; -3 => table
 				// copy the key so that lua_tostring does not modify the original
 				lua_pushvalue(L, -2); // stack now contains: -1 => key; -2 => value; -3 => key; -4 => table
-				dest.push_back(prefix + lua_tostring(L, -2) + postfix);
+				dest.data().push_back(prefix + lua_tostring(L, -2) + postfix);
 				// pop value + copy of key, leaving original key
 				lua_pop(L, 2);
 				// stack now contains: -1 => key; -2 => table
@@ -333,14 +340,14 @@ namespace utils
 		}
 
 		const auto s = lua_tolstring(L, -1, nullptr);
-		dest.push_back(s ? prefix + s + postfix : prefix + postfix);
+		dest.data().push_back(s ? prefix + s + postfix : prefix + postfix);
 	}
 
 	static void lua_register_function(const std::string& name, const variant& args, const std::string& body,
 		bool is_shared, const path& file, ini_parser_error_handler* handler)
 	{
 		std::string args_line;
-		for (auto& arg : args.data())
+		for (auto& arg : args)
 		{
 			if (!args_line.empty()) args_line += ',';
 			args_line += arg;
@@ -497,12 +504,13 @@ namespace utils
 	struct value_finalizer
 	{
 		std::string key;
-		std::vector<std::string>& dest;
+		variant& dest;
 		const script_params* params;
+		bool& include_value;
 		bool process_values;
 
-		value_finalizer(std::string key, std::vector<std::string>& dest, const script_params* params, bool process_values = true)
-			: key(std::move(key)), dest(dest), params(params), process_values(process_values) { }
+		value_finalizer(std::string key, bool& include_value, variant& dest, const script_params* params, bool process_values = true)
+			: key(std::move(key)), include_value(include_value), dest(dest), params(params), process_values(process_values) { }
 
 		static std::string fix_expression(const std::string& expr)
 		{
@@ -513,10 +521,10 @@ namespace utils
 		{
 			if (!params->allow_lua)
 			{
-				if (!prefix.empty() || !postfix.empty()) dest.push_back(prefix + postfix);
+				if (!prefix.empty() || !postfix.empty()) dest.data().push_back(prefix + postfix);
 				return;
 			}
-			lua_calculate(key, dest, fix_expression(expr), prefix, postfix, params->file, params->error_handler);
+			lua_calculate(key, include_value, dest, fix_expression(expr), prefix, postfix, params->file, params->error_handler);
 		}
 
 		static void unwrap(std::string& value, const std::string& type)
@@ -551,14 +559,14 @@ namespace utils
 			const auto spec = value.find(SPECIAL_CALCULATE);
 			if (spec == std::string::npos)
 			{
-				dest.push_back(value);
+				dest.data().push_back(value);
 				return;
 			}
 
 			const auto end = value.find(SPECIAL_END, spec + SPECIAL_CALCULATE.size());
 			if (end == std::string::npos)
 			{
-				dest.push_back(value);
+				dest.data().push_back(value);
 				return;
 			}
 
@@ -572,7 +580,7 @@ namespace utils
 		{
 			if (!process_values || value.size() <= 1)
 			{
-				dest.push_back(value);
+				dest.data().push_back(value);
 				return;
 			}
 
@@ -584,8 +592,8 @@ namespace utils
 				return;
 			}
 
-			dest.push_back(value);
-			unwrap(dest[dest.size() - 1], SPECIAL_MISSING_VARIABLE);
+			dest.data().push_back(value);
+			unwrap(dest.data()[dest.data().size() - 1], SPECIAL_MISSING_VARIABLE);
 		}
 	};
 
@@ -609,20 +617,26 @@ namespace utils
 		int substr_from = 0;
 		int substr_to = std::numeric_limits<int>::max();
 		bool with_fallback;
+		bool is_required;
 		special_mode mode{};
 
-		variable_info() : with_fallback(false) {}
+		variable_info() : with_fallback(false), is_required(false) {}
 
-		explicit variable_info(std::string name) : name(std::move(name)), with_fallback(true) {}
+		explicit variable_info(std::string name) : name(std::move(name)), with_fallback(true), is_required(false) {}
 
-		variable_info(std::string name, const int from, const int to, const special_mode mode)
-			: name(std::move(name)), substr_from(from), substr_to(to), with_fallback(false), mode(mode) {}
+		variable_info(std::string name, const int from, const int to, const special_mode mode, const bool is_required)
+			: name(std::move(name)), substr_from(from), substr_to(to), with_fallback(false), is_required(is_required), mode(mode) {}
 
-		bool get_values(const std::shared_ptr<variable_scope>& include_vars, std::vector<std::string>& result, const value_finalizer& dest)
+		bool get_values(const std::shared_ptr<variable_scope>& include_vars, std::vector<std::string>& result, bool& include_value, const value_finalizer& dest)
 		{
 			const auto v = include_vars->find(name);
 			if (!v)
 			{
+				if (is_required)
+				{
+					include_value = false;
+				}
+
 				switch (mode)
 				{
 					case special_mode::size:
@@ -651,6 +665,11 @@ namespace utils
 			if (data_size == 1 && v->data()[0].empty())
 			{
 				data_size = 0;
+			}
+
+			if (data_size == 0 && is_required)
+			{
+				include_value = false;
 			}
 
 			switch (mode)
@@ -740,10 +759,10 @@ namespace utils
 			return true;
 		}
 
-		void substitute(const std::shared_ptr<variable_scope>& include_vars, const value_finalizer& dest)
+		void substitute(const std::shared_ptr<variable_scope>& include_vars, bool& include_value, const value_finalizer& dest)
 		{
 			std::vector<std::string> result;
-			if (get_values(include_vars, result, dest))
+			if (get_values(include_vars, result, include_value, dest))
 			{
 				for (const auto& r : result) dest.add(r);
 			}
@@ -751,7 +770,7 @@ namespace utils
 			{
 				dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
 			}
-			else if (dest.params->error_handler && (name.empty() || !isdigit(name[0])))
+			else if (dest.params->error_handler && (name.empty() || !isdigit(name[0])) && !is_required)
 			{
 				dest.params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
 			}
@@ -861,11 +880,11 @@ namespace utils
 			return true;
 		}
 
-		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, const value_finalizer& dest,
-			const bool expr_mode)
+		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, bool& include_value,
+			const value_finalizer& dest, const bool expr_mode)
 		{
 			std::vector<std::string> result;
-			if (!get_values(include_vars, result, dest) && !expr_mode)
+			if (!get_values(include_vars, result, include_value, dest) && !expr_mode)
 			{
 				#if defined _DEBUG && defined USE_SIMPLE
 				// std::cerr << "Missing variable: " << name << '\n';
@@ -880,7 +899,7 @@ namespace utils
 				{
 					dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
 				}
-				if (!with_fallback && dest.params->error_handler)
+				if (!with_fallback && dest.params->error_handler && !is_required)
 				{
 					dest.params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
 				}
@@ -988,17 +1007,21 @@ namespace utils
 			auto to = stoi(pieces, 2, from_set ? 1 : SPECIAL_RANGE_LIMIT) + from;
 			if (size > 3 && pieces[2].empty()) to = stoi(pieces, 3, from_set ? from + 1 : SPECIAL_RANGE_LIMIT);
 			auto mode = variable_info::special_mode::none;
-			if (size > 1)
+			auto is_required = false;
+			for (auto i = 1U; i < size; i++)
 			{
-				if (pieces[size - 1] == "size" || pieces[size - 1] == "count") mode = variable_info::special_mode::size;
-				else if (pieces[size - 1] == "length") mode = variable_info::special_mode::length;
-				else if (pieces[size - 1] == "exists") mode = variable_info::special_mode::exists;
-				else if (pieces[size - 1] == "vec2") mode = variable_info::special_mode::vec2;
-				else if (pieces[size - 1] == "vec3") mode = variable_info::special_mode::vec3;
-				else if (pieces[size - 1] == "vec4") mode = variable_info::special_mode::vec4;
-				else if (pieces[size - 1] == "num" || pieces[size - 1] == "number") mode = variable_info::special_mode::number;
-				else if (pieces[size - 1] == "bool" || pieces[size - 1] == "boolean") mode = variable_info::special_mode::boolean;
-				else if (pieces[size - 1] == "str" || pieces[size - 1] == "string") mode = variable_info::special_mode::string;
+				const auto& piece = pieces[i];
+				if (piece.empty() || !islower(piece[0]) && piece[0] != '?') continue;
+				if (piece == "size" || piece == "count") mode = variable_info::special_mode::size;
+				else if (piece == "length") mode = variable_info::special_mode::length;
+				else if (piece == "exists") mode = variable_info::special_mode::exists;
+				else if (piece == "vec2") mode = variable_info::special_mode::vec2;
+				else if (piece == "vec3") mode = variable_info::special_mode::vec3;
+				else if (piece == "vec4") mode = variable_info::special_mode::vec4;
+				else if (piece == "num" || piece == "number") mode = variable_info::special_mode::number;
+				else if (piece == "bool" || piece == "boolean") mode = variable_info::special_mode::boolean;
+				else if (piece == "str" || piece == "string") mode = variable_info::special_mode::string;
+				if (piece == "required" || piece == "?") is_required = true;
 			}
 			if (from == 0)
 			{
@@ -1006,15 +1029,15 @@ namespace utils
 			}
 			if (from > 0) from--;
 			if (to > 0) to--;
-			return {pieces[0], from, to, mode};
+			return {pieces[0], from, to, mode, is_required};
 		}
 		const auto vname = s.substr(1);
 		if (!is_identifier(vname)) return {};
 		return variable_info{vname};
 	}
 
-	static void substitute_variable(const std::string& value, const std::shared_ptr<variable_scope>& include_vars, const value_finalizer& dest, const int stack,
-		std::vector<std::string>* referenced_variables)
+	static void substitute_variable(const std::string& value, const std::shared_ptr<variable_scope>& include_vars, bool& include_value, const value_finalizer& dest,
+		const int stack, std::vector<std::string>* referenced_variables)
 	{
 		#if defined _DEBUG && defined USE_SIMPLE
 		if (stack > 9)
@@ -1030,12 +1053,12 @@ namespace utils
 			if (!var.name.empty())
 			{
 				// Either $VariableName or ${VariableName}
-				std::vector<std::string> temp;
-				const auto finalizer = value_finalizer{var.name, temp, dest.params, false};
-				var.substitute(include_vars, finalizer);
+				variant temp;
+				const auto finalizer = value_finalizer{var.name, include_value, temp, dest.params, false};
+				var.substitute(include_vars, include_value, finalizer);
 				for (const auto& v : temp)
 				{
-					substitute_variable(v, include_vars, dest, stack + 1, referenced_variables);
+					substitute_variable(v, include_vars, include_value, dest, stack + 1, referenced_variables);
 				}
 				return;
 			}
@@ -1050,12 +1073,12 @@ namespace utils
 				{
 					var = check_variable(value.substr(var_begin, var_end - var_begin + 1), dest);
 					if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
-					std::vector<std::string> temp;
-					const auto finalizer = value_finalizer{var.name, temp, dest.params, false};
-					var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end + 1), finalizer, expr_mode);
+					variant temp;
+					const auto finalizer = value_finalizer{var.name, include_value, temp, dest.params, false};
+					var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end + 1), include_value, finalizer, expr_mode);
 					for (const auto& v : temp)
 					{
-						substitute_variable(v, include_vars, dest, stack + 1, referenced_variables);
+						substitute_variable(v, include_vars, include_value, dest, stack + 1, referenced_variables);
 					}
 					return;
 				}
@@ -1076,12 +1099,12 @@ namespace utils
 					{
 						var = check_variable(value.substr(var_begin, var_end - var_begin), dest);
 						if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
-						std::vector<std::string> temp;
-						const auto finalizer = value_finalizer{var.name, temp, dest.params, false};
-						var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end), finalizer, expr_mode);
+						variant temp;
+						const auto finalizer = value_finalizer{var.name, include_value, temp, dest.params, false};
+						var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end), include_value, finalizer, expr_mode);
 						for (const auto& v : temp)
 						{
-							substitute_variable(v, include_vars, dest, stack + 1, referenced_variables);
+							substitute_variable(v, include_vars, include_value, dest, stack + 1, referenced_variables);
 						}
 						return;
 					}
@@ -1243,7 +1266,7 @@ namespace utils
 			for (const auto& p : vars)
 			{
 				auto r = std::hash<std::string>{}(p.first);
-				for (const auto& v : p.second.data())
+				for (const auto& v : p.second)
 				{
 					r = (r * 397) ^ std::hash<std::string>{}(v);
 				}
@@ -1286,19 +1309,50 @@ namespace utils
 			return {};
 		}
 
-		value_finalizer get_value_finalizer(const std::string& key, std::vector<std::string>& dest) const
+		value_finalizer get_value_finalizer(const std::string& key, bool& include_value, variant& dest) const
 		{
-			return {key, dest, &current_params, true};
+			return {key, include_value, dest, &current_params, true};
 		}
 
-		variant substitute_variable_array(const std::string& key, const variant& v, const std::shared_ptr<variable_scope>& sc, std::vector<std::string>& referenced_variables) const
+		static bool is_inline_param(const std::string& key, const std::string& value)
 		{
-			variant dest;
-			for (const auto& piece : v.data())
+			return (key.find("@MIXIN") == 0 || key.find("@GENERATOR") == 0) && value.find_first_of('=') != std::string::npos;
+		}
+
+		static bool delayed_substitute(current_section_info* c)
+		{
+			return c && (c->section_key == "DEFAULTS" || c->section_key == "INCLUDE" || c->target_template);
+		}
+
+		bool substitute_variable_array(const std::string& key, const variant& v, const std::shared_ptr<variable_scope>& sc,
+			std::vector<std::string>* referenced_variables, variant& result) const
+		{
+			auto include_value_ret = true;
+			for (const auto& piece : v)
 			{
-				substitute_variable(piece, sc, get_value_finalizer(key, dest.data()), 0, &referenced_variables);
+				if (!result.empty() && is_inline_param(key, piece))
+				{
+					result.data().push_back(piece);
+				}
+				else
+				{
+					substitute_variable(piece, sc, include_value_ret, get_value_finalizer(key, include_value_ret, result), 0, referenced_variables);
+				}
 			}
-			return dest;
+			return include_value_ret;
+		}
+
+		bool split_and_substitute(const std::string& key, current_section_info* c, const std::string& value, const std::shared_ptr<variable_scope>& sc,
+			std::vector<std::string>* referenced_variables, variant& result) const
+		{
+			const auto split = split_string_quotes(value);
+			if (delayed_substitute(c)) 
+			{
+				result = split;
+				return true;
+			}
+
+			return substitute_variable_array(key, split, sc, referenced_variables ? referenced_variables : c ? &c->referenced_variables : nullptr, result);
 		}
 
 		void resolve_generator_impl(const std::shared_ptr<section_template>& t, const std::string& key, const std::string& section_key,
@@ -1329,7 +1383,12 @@ namespace utils
 					{
 						gen_scope = scope->inherit();
 					}
-					gen_scope->explicit_values[param_key] = substitute_variable_array(param_key, v0.second, gen_scope, referenced_variables);
+
+					variant v;
+					if (substitute_variable_array(param_key, v0.second, gen_scope, &referenced_variables, v))
+					{
+						gen_scope->explicit_values[param_key] = v;
+					}
 				}
 			}
 			parse_ini_section_finish(generated, gen_scope, &referenced_variables);
@@ -1355,7 +1414,7 @@ namespace utils
 		}
 
 		void set_inline_values(std::shared_ptr<variable_scope>& scope_own, const std::shared_ptr<variable_scope>& scope,
-			const variant& trigger, const int index, std::vector<std::string>& referenced_variables)
+			const variant& trigger, const int index, std::vector<std::string>& referenced_variables) const
 		{
 			for (auto i = index; i < int(trigger.data().size()); i++)
 			{
@@ -1372,8 +1431,20 @@ namespace utils
 					auto set_value = item.substr(set + 1);
 					trim_self(set_key);
 					trim_self(set_value);
-					scope_own->explicit_values[set_key] = split_and_substitute(set_key, nullptr, set_value, scope_own, &referenced_variables);
-					continue;
+
+					variant v;
+					if (split_and_substitute(set_key, nullptr, set_value, scope_own, &referenced_variables, v))
+					{
+						scope_own->explicit_values[set_key] = v;
+					}
+				}
+				else if (is_identifier(item, false))
+				{
+					if (!scope_own)
+					{
+						scope_own = scope->inherit();
+					}
+					scope_own->explicit_values[item] = variant("1");
 				}
 			}
 		}
@@ -1389,7 +1460,8 @@ namespace utils
 			std::vector<int> repeats;
 			for (auto i = 1; i < int(trigger.data().size()); i++)
 			{
-				if (trigger.data()[i].find_first_of('=') == std::string::npos)
+				if (trigger.data()[i].find_first_of('=') == std::string::npos
+					&& !is_identifier(trigger.data()[i], false))
 				{
 					repeats.push_back(trigger.as<int>(i));
 				}
@@ -1437,8 +1509,8 @@ namespace utils
 			const auto inactive = gen_find(t->values, "@ACTIVE");
 			if (inactive != t->values.end())
 			{
-				const auto dest = substitute_variable_array("@ACTIVE", inactive->second, sc, referenced_variables);
-				if (!dest.as<bool>()) return;
+				variant v;
+				if (substitute_variable_array("@ACTIVE", inactive->second, sc, &referenced_variables, v) && !v.as<bool>()) return;
 			}
 
 			for (const auto& v : t->values)
@@ -1461,7 +1533,12 @@ namespace utils
 					continue;
 				}
 
-				auto dest = substitute_variable_array(v.first, v.second, sc, referenced_variables);
+				variant dest;
+				if (!substitute_variable_array(v.first, v.second, sc, &referenced_variables, dest))
+				{
+					continue;
+				}
+
 				if (is_output)
 				{
 					c.section_key = dest.as<std::string>();
@@ -1473,7 +1550,7 @@ namespace utils
 				}
 				else if (is_mixin)
 				{
-					resolve_mixin(c, sc, dest.data());
+					resolve_mixin(c, sc, dest);
 				}
 				else if (!is_virtual)
 				{
@@ -1484,10 +1561,10 @@ namespace utils
 			}
 		}
 
-		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const std::vector<std::string>& trigger)
+		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const variant& trigger)
 		{
 			std::shared_ptr<section_template> t;
-			if (trigger.empty() || !get_mixin(trigger[0], t)) return;
+			if (trigger.empty() || !get_mixin(trigger.data()[0], t)) return;
 
 			std::shared_ptr<variable_scope> scope_own;
 			set_inline_values(scope_own, sc, trigger, 1, c.referenced_variables);
@@ -1599,13 +1676,13 @@ namespace utils
 			return c == ' ' || c == '\t' || c == '\r';
 		}
 
-		static std::vector<std::string> split_string_quotes(const std::string& str)
+		static variant split_string_quotes(const std::string& str)
 		{
-			std::vector<std::string> result;
+			variant result;
 
 			if (is_solid(str, 0))
 			{
-				result.push_back(str);
+				result.data().push_back(str);
 				return result;
 			}
 
@@ -1676,7 +1753,7 @@ namespace utils
 				}
 				else if (q == -1 && c == ',')
 				{
-					result.push_back(item);
+					result.data().push_back(item);
 					item.clear();
 					last_nonspace = i + 1;
 				}
@@ -1695,7 +1772,7 @@ namespace utils
 					last_nonspace++;
 				}
 			}
-			result.push_back(item);
+			result.data().push_back(item);
 			return result;
 		}
 
@@ -1704,25 +1781,6 @@ namespace utils
 			std::string group_us;
 			return is_sequential(key, group_us)
 				? group_us + SPECIAL_KEY_AUTOINCREMENT + std::to_string(key_autoinc_index++) : key;
-		}
-
-		std::vector<std::string> split_and_substitute(const std::string& key, current_section_info* c, const std::string& value, const std::shared_ptr<variable_scope>& sc,
-			std::vector<std::string>* referenced_variables) const
-		{
-			std::vector<std::string> value_splitted;
-			for (const auto& value_piece : split_string_quotes(value))
-			{
-				if (c && (c->section_key == "DEFAULTS" || c->section_key == "INCLUDE" || c->target_template))
-				{
-					value_splitted.push_back(value_piece);
-				}
-				else
-				{
-					substitute_variable(value_piece, sc, get_value_finalizer(key, value_splitted), 0,
-						referenced_variables ? referenced_variables : c ? &c->referenced_variables : nullptr);
-				}
-			}
-			return value_splitted;
 		}
 
 		void parse_ini_finish(current_section_info& c, const std::string& data, const int non_space, std::string& key,
@@ -1746,7 +1804,11 @@ namespace utils
 			const auto new_key = current_params.allow_override || !c.referenced_templates.empty() || (c.section_mode()
 				? c.target_section.find(key) == c.target_section.end()
 				: gen_find((*c.target_template).values, key) == (*c.target_template).values.end());
-			const auto splitted = split_and_substitute(key, &c, value, sc, &c.referenced_variables);
+			variant splitted;
+			if (!split_and_substitute(key, &c, value, sc, &c.referenced_variables, splitted))
+			{
+				return;
+			}
 
 			if (c.section_mode())
 			{
@@ -1765,7 +1827,7 @@ namespace utils
 				else if (c.section_key == "DEFAULTS")
 				{
 					const auto compatible_mode = key.find("VAR") == 0 && !splitted.empty();
-					const auto& actual_key = compatible_mode ? splitted[0] : key;
+					const auto& actual_key = compatible_mode ? splitted.data()[0] : key;
 					scope->default_values[actual_key] = compatible_mode ? variant(splitted).as<variant>(1) : splitted;
 				}
 				else if (c.section_key == "INCLUDE" && key == "INCLUDE")
@@ -1882,7 +1944,8 @@ namespace utils
 				cs_keys = cs_keys.substr(separator + 1);
 			}
 
-			const auto section_names = split_string(cs_keys, ",", true, true);
+			auto section_names = split_string(cs_keys, ",", true, true);
+			if (section_names.empty()) section_names.emplace_back("");
 
 			if (is_template)
 			{
@@ -2278,7 +2341,7 @@ namespace utils
 			{
 				stream << section_line.first << '=';
 				size_t i = 0;
-				for (const auto& item : section_line.second.data())
+				for (const auto& item : section_line.second)
 				{
 					if (i++ != 0)
 					{
@@ -2304,7 +2367,7 @@ namespace utils
 			{
 				stream << section_line.first << '=';
 				size_t i = 0;
-				for (const auto& item : section_line.second.data())
+				for (const auto& item : section_line.second)
 				{
 					if (i++ != 0)
 					{
@@ -2330,7 +2393,7 @@ namespace utils
 			for (const auto& k : s.second)
 			{
 				auto& v = result[s.first][k.first] = json::array();
-				for (const auto& d : k.second.data())
+				for (const auto& d : k.second)
 				{
 					v.push_back(d);
 				}
