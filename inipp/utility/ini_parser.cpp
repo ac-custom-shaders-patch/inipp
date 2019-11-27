@@ -667,7 +667,8 @@ namespace utils
 				data_size = 0;
 			}
 
-			if (data_size == 0 && is_required)
+			const auto count = std::min(substr_to - substr_from, data_size - substr_from);
+			if (count <= 0 && is_required)
 			{
 				include_value = false;
 			}
@@ -676,18 +677,17 @@ namespace utils
 			{
 				case special_mode::size:
 				{
-					const auto count = std::min(substr_to - substr_from, data_size - substr_from);
 					result.push_back(std::to_string(count));
 					break;
 				}
 				case special_mode::length:
 				{
-					size_t count = 0;
+					size_t total_length = 0;
 					for (auto j = substr_from, jt = data_size; j < jt && j < substr_to; j++)
 					{
-						count += v->data()[j].size();
+						total_length += v->data()[j].size();
 					}
-					result.push_back(std::to_string(count));
+					result.push_back(std::to_string(total_length));
 					break;
 				}
 				case special_mode::exists:
@@ -714,7 +714,6 @@ namespace utils
 				case special_mode::vec3:
 				case special_mode::vec4:
 				{
-					const auto count = int(std::min(substr_to - substr_from, data_size - substr_from));
 					const auto vec_size = int(2 + int(mode) - int(special_mode::vec2));
 					for (auto j = substr_from, jt = data_size; j < jt && j < substr_to; j++)
 					{
@@ -993,43 +992,48 @@ namespace utils
 		return stoi(v[index], default_value, set_ptr);
 	}
 
+	static variable_info get_parametrized_variable_info(const std::string& s, const value_finalizer& dest)
+	{
+		const auto pieces = split_string(s, ":", false, true);
+		const auto size = pieces.size();
+		if (size == 0 || size > 5 || !is_identifier(pieces[0])) return {};
+		bool from_set;
+		auto from = stoi(pieces, 1, 1, &from_set);
+		auto to = stoi(pieces, 2, from_set ? 1 : SPECIAL_RANGE_LIMIT) + from;
+		if (size > 3 && pieces[2].empty()) to = stoi(pieces, 3, from_set ? from + 1 : SPECIAL_RANGE_LIMIT);
+		auto mode = variable_info::special_mode::none;
+		auto is_required = false;
+		for (auto i = 1U; i < size; i++)
+		{
+			const auto& piece = pieces[i];
+			if (piece.empty() || !islower(piece[0]) && piece[0] != '?') continue;
+			if (piece == "size" || piece == "count") mode = variable_info::special_mode::size;
+			else if (piece == "length") mode = variable_info::special_mode::length;
+			else if (piece == "exists") mode = variable_info::special_mode::exists;
+			else if (piece == "vec2") mode = variable_info::special_mode::vec2;
+			else if (piece == "vec3") mode = variable_info::special_mode::vec3;
+			else if (piece == "vec4") mode = variable_info::special_mode::vec4;
+			else if (piece == "num" || piece == "number") mode = variable_info::special_mode::number;
+			else if (piece == "bool" || piece == "boolean") mode = variable_info::special_mode::boolean;
+			else if (piece == "str" || piece == "string") mode = variable_info::special_mode::string;
+			if (piece == "required" || piece == "?") is_required = true;
+		}
+		if (from == 0)
+		{
+			dest.params->error_handler->on_error(dest.params->file, ("Indices start with 1: " + pieces[0] + ", got: '" + s + "'").c_str());
+		}
+		if (from > 0) from--;
+		if (to > 0) to--;
+		return {pieces[0], from, to, mode, is_required};
+	}
+
 	static variable_info check_variable(const std::string& s, const value_finalizer& dest)
 	{
 		if (s.size() < 2) return {};
 		if (s[0] != '$') return {};
 		if (s[1] == '{' && s[s.size() - 1] == '}')
 		{
-			const auto pieces = split_string(s.substr(2, s.size() - 3), ":", false, true);
-			const auto size = pieces.size();
-			if (size == 0 || size > 5 || !is_identifier(pieces[0])) return {};
-			bool from_set;
-			auto from = stoi(pieces, 1, 1, &from_set);
-			auto to = stoi(pieces, 2, from_set ? 1 : SPECIAL_RANGE_LIMIT) + from;
-			if (size > 3 && pieces[2].empty()) to = stoi(pieces, 3, from_set ? from + 1 : SPECIAL_RANGE_LIMIT);
-			auto mode = variable_info::special_mode::none;
-			auto is_required = false;
-			for (auto i = 1U; i < size; i++)
-			{
-				const auto& piece = pieces[i];
-				if (piece.empty() || !islower(piece[0]) && piece[0] != '?') continue;
-				if (piece == "size" || piece == "count") mode = variable_info::special_mode::size;
-				else if (piece == "length") mode = variable_info::special_mode::length;
-				else if (piece == "exists") mode = variable_info::special_mode::exists;
-				else if (piece == "vec2") mode = variable_info::special_mode::vec2;
-				else if (piece == "vec3") mode = variable_info::special_mode::vec3;
-				else if (piece == "vec4") mode = variable_info::special_mode::vec4;
-				else if (piece == "num" || piece == "number") mode = variable_info::special_mode::number;
-				else if (piece == "bool" || piece == "boolean") mode = variable_info::special_mode::boolean;
-				else if (piece == "str" || piece == "string") mode = variable_info::special_mode::string;
-				if (piece == "required" || piece == "?") is_required = true;
-			}
-			if (from == 0)
-			{
-				dest.params->error_handler->on_error(dest.params->file, ("Indices start with 1: " + pieces[0] + ", got: '" + s + "'").c_str());
-			}
-			if (from > 0) from--;
-			if (to > 0) to--;
-			return {pieces[0], from, to, mode, is_required};
+			return get_parametrized_variable_info(s.substr(2, s.size() - 3), dest);
 		}
 		const auto vname = s.substr(1);
 		if (!is_identifier(vname)) return {};
@@ -1346,7 +1350,7 @@ namespace utils
 			std::vector<std::string>* referenced_variables, variant& result) const
 		{
 			const auto split = split_string_quotes(value);
-			if (delayed_substitute(c)) 
+			if (delayed_substitute(c))
 			{
 				result = split;
 				return true;
