@@ -1050,7 +1050,7 @@ namespace utils
 		}
 		#endif
 
-		if (stack < 10)
+		if (stack < 100)
 		{
 			auto var = check_variable(value, dest);
 			if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
@@ -1320,7 +1320,7 @@ namespace utils
 
 		static bool is_inline_param(const std::string& key, const std::string& value)
 		{
-			return (key.find("@MIXIN") == 0 || key.find("@GENERATOR") == 0) && value.find_first_of('=') != std::string::npos;
+			return (key.find("@MIXIN") == 0 || key == "@" || key.find("@GENERATOR") == 0) && value.find_first_of('=') != std::string::npos;
 		}
 
 		static bool delayed_substitute(current_section_info* c)
@@ -1349,7 +1349,7 @@ namespace utils
 		bool split_and_substitute(const std::string& key, current_section_info* c, const std::string& value, const std::shared_ptr<variable_scope>& sc,
 			std::vector<std::string>* referenced_variables, variant& result) const
 		{
-			const auto split = split_string_quotes(value);
+			const auto split = split_string_quotes(value, !key.empty() && key[0] == '@');
 			if (delayed_substitute(c))
 			{
 				result = split;
@@ -1526,7 +1526,7 @@ namespace utils
 
 				const auto is_generator = v.first.find("@GENERATOR") == 0;
 				const auto is_generator_param = is_generator && v.first.find_first_of(':') != std::string::npos;
-				const auto is_mixin = v.first.find("@MIXIN") == 0;
+				const auto is_mixin = v.first.find("@MIXIN") == 0 || v.first == "@";
 				const auto is_virtual = is_output || is_generator || is_mixin;
 
 				auto& set_via_template = c.set_via_template[t.get()];
@@ -1565,14 +1565,20 @@ namespace utils
 			}
 		}
 
-		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const variant& trigger)
+		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const std::string& mixin_name, const variant& trigger, int inline_values_index)
 		{
 			std::shared_ptr<section_template> t;
-			if (trigger.empty() || !get_mixin(trigger.data()[0], t)) return;
+			if (!get_mixin(mixin_name, t)) return;
 
 			std::shared_ptr<variable_scope> scope_own;
-			set_inline_values(scope_own, sc, trigger, 1, c.referenced_variables);
+			set_inline_values(scope_own, sc, trigger, inline_values_index, c.referenced_variables);
 			resolve_template(c, scope_own ? scope_own : sc, t, c.referenced_variables);
+		}
+
+		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const variant& trigger)
+		{
+			if (trigger.empty()) return;
+			resolve_mixin(c, sc, trigger.data()[0], trigger, 1);
 		}
 
 		void parse_ini_section_finish(current_section_info& c, const std::shared_ptr<variable_scope>& scope,
@@ -1680,7 +1686,7 @@ namespace utils
 			return c == ' ' || c == '\t' || c == '\r';
 		}
 
-		static variant split_string_quotes(const std::string& str)
+		static variant split_string_quotes(const std::string& str, bool consider_inline_params)
 		{
 			variant result;
 
@@ -1743,7 +1749,7 @@ namespace utils
 						u = false;
 						q = -1;
 					}
-					else if (item.empty() && q == -1)
+					else if ((consider_inline_params || item.empty()) && q == -1)
 					{
 						q = c;
 						if (i > 0 && str[i - 1] == '$') u = true;
@@ -1816,7 +1822,7 @@ namespace utils
 
 			if (c.section_mode())
 			{
-				if (key.find("@MIXIN") == 0)
+				if (key.find("@MIXIN") == 0 || key == "@")
 				{
 					resolve_mixin(c, sc, splitted);
 				}

@@ -6,7 +6,11 @@ end math.clamp=function(x,min,max)if type(x)=='table'then return x:clamp(min,max
 end math.saturate=function(x)return math.clamp(x,0,1)end math.sign=function(x)if type(x)=='table'then return x:sign()end if x<0 then return -1 elseif x>0 then return 1 else return 0 end end math.lerp=function(x,y,s)if type(x)=='table'then return x:lerp(y,s)end return x*(1-s)+y*s
 end math.lerpInvSat=function(s,min,max)return math.saturate((s-min)/(max-min))end
 math.smoothstep=function(x)return x*x*(3-2*x)end
-math.smootherstep=function(x)return x*x*x*(x*(x*6-15)+10)end function __conv_result(arg)function conv_val(arg)if arg==nil then return''end if type(arg)=='boolean'then return arg and'1'or'0'end if type(arg)=='number'then return arg end if type(arg)=='table'then return arg end return tostring(arg)end function conv_table(ret,arg)if type(arg)=='table'then for k,v in pairs(arg)do conv_table(ret,v)end elseif type(arg)~='function'then ret[#ret+1]=conv_val(arg)end end if type(arg)=='table'then local ret={}conv_table(ret,arg)return ret end return conv_val(arg)end function discard()error('__discardError__')end abs=math.abs
+math.smootherstep=function(x)return x*x*x*(x*(x*6-15)+10)end function __conv_result(arg)function conv_val(arg)if arg==nil then return''end if type(arg)=='boolean'then return arg and'1'or'0'end if type(arg)=='number'then return arg end if type(arg)=='table'then return arg end return tostring(arg)end function conv_table(ret,arg)if type(arg)=='table'then for k,v in pairs(arg)do conv_table(ret,v)end elseif type(arg)~='function'then ret[#ret+1]=conv_val(arg)end end if type(arg)=='table'then local ret={}conv_table(ret,arg)return ret end return conv_val(arg)end function discard()error('__discardError__')end
+function def(i,x)if i~=nil then return i end return x end
+function def2(i,x,y)if i~=nil then return i end return vec2(x,y)end
+function def3(i,x,y,z)if i~=nil then return i end return vec3(x,y,z)end
+function def4(i,x,y,z,w)if i~=nil then return i end return vec4(x,y,z,w)end abs=math.abs
 acos=math.acos
 asin=math.asin
 atan=math.atan

@@ -176,9 +176,11 @@ code.push(`function __conv_result(arg)
   return conv_val(arg)
 end
 
-function discard()
-  error('__discardError__')
-end
+function discard() error('__discardError__') end
+function def(i, x) if i ~= nil then return i end return x end
+function def2(i, x, y) if i ~= nil then return i end return vec2(x, y) end
+function def3(i, x, y, z) if i ~= nil then return i end return vec3(x, y, z) end
+function def4(i, x, y, z, w) if i ~= nil then return i end return vec4(x, y, z, w) end
 `);
 
 for (let n in aliases){
