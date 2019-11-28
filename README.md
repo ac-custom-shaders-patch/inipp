@@ -196,7 +196,8 @@ Possible modes defined in curly brackets (all modes can work with subset if need
   - `:count` — returns amount of values;
   - `:length` — returns string length of value (or several);
   - `:exists` — turns to 1 if value(s) exists, or in 0 otherwise;
-  - `:vec2`, `:vec3`, `:vec4` — turn value into a vector: forces certain length, turns everything which isn’t a number to 0, good for sanitizing inputs (see “Expressions”).
+  - `:vec2`, `:vec3`, `:vec4` — turn value into a vector: forces certain length, turns everything which isn’t a number to 0, good for sanitizing inputs (see “Expressions”);
+  - `:required` or `:?` — drop the whole value if variable (or its subset) is missing.
 
 <details><summary>Subsets example</summary>
 
@@ -317,6 +318,8 @@ This one is simple. If you add “$” in front of a string, its value will be c
 
 **Important:** variables substitution works differently for expressions. Strings get wrapped in quotes, missing values turn to `nil`, and if variable is a list, it’ll be passed as a table. Also, of course, if expression returns table, it’ll turn into a list. If variable has the length of 2, 3 or 4 and consists of nothing but valid numbers, it’ll be passed as a vector (the same table, but with working operators). Also, you can create new vectors in Lua using `vec2(x, y)`, `vec3(x, y, z)` and `vec4(x, y, z, w)`. Vectors also have methods `vec2(x, y):length()`, `vec2(x, y):normalize()` and `dot(vec2(x, y), vec2(z, w))`.
 
+Expressions can drop the entire value by using `discard()` function. Also, there is a `def(X, Y)` function, returning Y if X is `nil`, great for defining default values.
+
 <details><summary>Example</summary>
 
 #### √2
@@ -343,6 +346,11 @@ ACTIVE = $" $LightsIntensity > 1 " ; boolean values will produce either 1 or 0
 DESCRIPTION = $" 'Light with the intensity: ' .. (2 * $LightsIntensity) "
 COLOR = $" { $LightsIntensity * 0.2, $LightsIntensity * 0.3, $LightsIntensity * 0.4 } " ; tables will turn into lists
 DIRECTION = $" ${LightsDirection:vec3}:normalize() " ; “:vec3” is not required, but it’ll make sure expression will work even if LightsDirection doesn’t have any numbers in it
+
+; Example of default values
+[EXAMPLE]
+KEY = $" def($Variable, 10) " ; if $Variable is not set, uses 10
+KEY_2 = $" def2($Variable, 10, 15) " ; if $Variable is not set, uses (10, 15)
 ```
 
 </details>
