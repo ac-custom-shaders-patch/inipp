@@ -10,7 +10,8 @@
 
 #ifdef USE_SIMPLE
 #define DBG(v) std::cout << "[" << __func__ << ":" << __LINE__ << "] " << #v << "=" << (v) << '\n';
-#define HERE std::cout << __FILE__ << ":" << __func__ << ":" << __LINE__ << '\n';
+#define LOG(v) std::cerr
+#define HERE std::cout << __FILE__ << ":" << __func__ << ":" << __LINE__ <<  '\n';
 #endif
 
 namespace utils
@@ -253,7 +254,7 @@ namespace utils
 		bool allow_includes = false;
 		bool allow_override = true;
 		bool allow_lua = true;
-		bool erase_referenced = true;
+		bool erase_referenced = false;
 
 		script_params() = default;
 		script_params(const script_params& other) = delete;
@@ -276,8 +277,18 @@ namespace utils
 	{
 		lua_State* ptr{};
 		bool is_clean{};
+		uint32_t used{};
 		std::vector<std::string> imported;
 	} lua_state;
+
+	void ini_parser::reset_expressions_state()
+	{
+		if (lua_state.ptr)
+		{
+			lua_close(lua_state.ptr);
+			lua_state.ptr = nullptr;
+		}
+	}
 
 	static lua_State* lua_get_state()
 	{
@@ -296,6 +307,7 @@ namespace utils
 			luaL_loadstring(lua_state.ptr, LUA_STD_LUB) || lua_pcall(lua_state.ptr, 0, -1, 0);
 			lua_state.is_clean = true;
 		}
+		lua_state.used++;
 		return lua_state.ptr;
 	}
 
@@ -304,14 +316,47 @@ namespace utils
 		const path& file, ini_parser_error_handler* handler)
 	{
 		const auto L = lua_get_state();
-		if (luaL_loadstring(L, expr.c_str()) || lua_pcall(L, 0, -1, 0))
+
+		auto ret = luaL_loadstring(L, expr.c_str());
+		if (ret == LUA_ERRMEM)
 		{
-			const auto error_msg = std::string(lua_tolstring(L, -1, nullptr));
+			LOG(ERROR) << "Failed to process `" << expr << "`: out of memory trying to load expression";
+			include_value = false;
+			return;
+		}
+
+		if (ret == LUA_ERRSYNTAX)
+		{
+			LOG(ERROR) << "Failed to process `" << expr << "`: syntax error";
+			include_value = false;
+			return;
+		}
+
+		ret = lua_pcall(L, 0, -1, 0);
+		if (ret == LUA_ERRMEM)
+		{
+			LOG(ERROR) << "Failed to process `" << expr << "`: out of memory trying to run expression";
+			include_value = false;
+			return;
+		}
+
+		if (ret == LUA_ERRERR)
+		{
+			LOG(ERROR) << "Failed to process `" << expr << "`: error in error";
+			include_value = false;
+			return;
+		}
+
+		if (ret != 0)
+		{
+			const auto error_ptr = lua_tolstring(L, -1, nullptr);
+			const auto error_msg = error_ptr ? std::string(error_ptr) : "";
 			if (error_msg.find("__discardError__") != std::string::npos)
 			{
 				include_value = false;
 				return;
 			}
+			DBG(expr, error_msg)
 			if (handler) handler->on_error(file, (error_msg + "\nKey: " + key + "\nCommand: " + expr).c_str());
 			if (!prefix.empty() || !postfix.empty()) dest.data().push_back(prefix + postfix);
 			return;
@@ -608,10 +653,30 @@ namespace utils
 			vec2,
 			vec3,
 			vec4,
+			x,
+			y,
+			z,
+			w,
 			number,
 			boolean,
 			string,
 		};
+
+		void wrap_auto(std::string& s) const
+		{
+			if (mode == special_mode::none || mode >= special_mode::x && mode <= special_mode::w)
+			{
+				wrap_if_not_a_number(s);
+			}
+			else if (mode == special_mode::exists)
+			{
+				s = variant(s).as<bool>() ? "true" : "false";
+			}
+			else if (mode == special_mode::string)
+			{
+				wrap(s);
+			}
+		}
 
 		std::string name;
 		int substr_from = 0;
@@ -710,6 +775,31 @@ namespace utils
 					result.push_back(v->as<std::string>(substr_from));
 					break;
 				}
+				case special_mode::x:
+				case special_mode::y:
+				case special_mode::z:
+				case special_mode::w:
+				{
+					const auto index = int(mode) - int(special_mode::x);
+					if (index >= count)
+					{
+						if (count == 1)
+						{
+							result.push_back(v->data()[substr_from]);
+						}
+						else
+						{
+							dest.params->error_handler->on_warning(dest.params->file, ("Expected item with at least " + std::to_string(index + 1) + " values, got "
+								+ std::to_string(count) + ", variable " + name).c_str());
+							result.emplace_back("0");
+						}
+					}
+					else
+					{
+						result.push_back(v->data()[substr_from + index]);
+					}
+					break;
+				}
 				case special_mode::vec2:
 				case special_mode::vec3:
 				case special_mode::vec4:
@@ -731,7 +821,7 @@ namespace utils
 
 					if (result.size() != 1 && count != vec_size)
 					{
-						dest.params->error_handler->on_warning(dest.params->file, ("Expected version with " + std::to_string(vec_size) + " values, got "
+						dest.params->error_handler->on_warning(dest.params->file, ("Expected item with " + std::to_string(vec_size) + " values, got "
 							+ std::to_string(count) + ", variable " + name).c_str());
 					}
 
@@ -914,14 +1004,7 @@ namespace utils
 				}
 				else if (result.size() == 1)
 				{
-					if (mode == special_mode::none)
-					{
-						wrap_if_not_a_number(result[0]);
-					}
-					else if (mode == special_mode::string)
-					{
-						wrap(result[0]);
-					}
+					wrap_auto(result[0]);
 					s += result[0];
 				}
 				else if (result.size() <= 4 && all_numbers(result))
@@ -1013,6 +1096,10 @@ namespace utils
 			else if (piece == "vec2") mode = variable_info::special_mode::vec2;
 			else if (piece == "vec3") mode = variable_info::special_mode::vec3;
 			else if (piece == "vec4") mode = variable_info::special_mode::vec4;
+			else if (piece == "x") mode = variable_info::special_mode::x;
+			else if (piece == "y") mode = variable_info::special_mode::y;
+			else if (piece == "z") mode = variable_info::special_mode::z;
+			else if (piece == "w") mode = variable_info::special_mode::w;
 			else if (piece == "num" || piece == "number") mode = variable_info::special_mode::number;
 			else if (piece == "bool" || piece == "boolean") mode = variable_info::special_mode::boolean;
 			else if (piece == "str" || piece == "string") mode = variable_info::special_mode::string;
@@ -1436,10 +1523,24 @@ namespace utils
 					trim_self(set_key);
 					trim_self(set_value);
 
-					variant v;
-					if (split_and_substitute(set_key, nullptr, set_value, scope_own, &referenced_variables, v))
+					if (set_key.find(SPECIAL_CALCULATE) == 0
+						&& set_value.size() > SPECIAL_END.size()
+						&& set_value.substr(set_value.size() - SPECIAL_END.size()) == SPECIAL_END)
 					{
-						scope_own->explicit_values[set_key] = v;
+						set_key = set_key.substr(SPECIAL_CALCULATE.size());
+						variant v;
+						if (substitute_variable_array(set_key, variant((SPECIAL_CALCULATE + set_value).c_str()), scope_own, &referenced_variables, v))
+						{
+							scope_own->explicit_values[set_key] = v;
+						}
+					}
+					else
+					{
+						variant v;
+						if (split_and_substitute(set_key, nullptr, set_value, scope_own, &referenced_variables, v))
+						{
+							scope_own->explicit_values[set_key] = v;
+						}
 					}
 				}
 				else if (is_identifier(item, false))
@@ -1558,7 +1659,19 @@ namespace utils
 				}
 				else if (!is_virtual)
 				{
-					const auto key = convert_key_autoinc(v.first);
+					auto key = v.first;
+					if (key.find("${") != std::string::npos || key.find("$\"") != std::string::npos
+						|| key.find(SPECIAL_CALCULATE) != std::string::npos)
+					{
+						variant key_v;
+						if (!substitute_variable_array(key, key, sc, &referenced_variables, key_v))
+						{
+							return;
+						}
+						key = key_v.as<std::string>();
+					}
+
+					key = convert_key_autoinc(key);
 					c.target_section[key] = dest;
 					set_via_template.push_back(key);
 				}
@@ -1686,6 +1799,22 @@ namespace utils
 			return c == ' ' || c == '\t' || c == '\r';
 		}
 
+		static bool is_special_symbol(char c, char& maps_to, bool quoted)
+		{
+			switch (c)
+			{
+				case '\n': maps_to = 0;
+					return true;
+				case 'n': maps_to = '\n';
+					return true;
+				case 't': maps_to = '\t';
+					return true;
+				case 'r': maps_to = '\r';
+					return true;
+				default: return false;
+			}
+		}
+
 		static variant split_string_quotes(const std::string& str, bool consider_inline_params)
 		{
 			variant result;
@@ -1703,19 +1832,21 @@ namespace utils
 			for (auto i = 0, t = int(str.size()); i < t; i++)
 			{
 				const auto c = str[i];
-
-				if (c == '\\' && i < t - 1 && ((str[i + 1] == '"' || str[i + 1] == '\'') && (item.empty() || q != -1) || str[i + 1] == ','))
+				
+				if (c == '\\' && i < t - 1 && (str[i + 1] == '\n' || (str[i + 1] == '"' || str[i + 1] == '\'') && (item.empty() || q != -1) || str[i + 1] == ','))
 				{
 					item += str.substr(last_nonspace, i - last_nonspace);
 					i++;
-					item += str[i];
+					if (str[i] != '\n') item += str[i];
 					last_nonspace = i + 1;
 					continue;
 				}
 
-				if (c == '\\' && i < t - 1 && str[i + 1] == '\n')
+				char maps_to;
+				if (!u && q == '"' && c == '\\' && i < t - 1 && is_special_symbol(str[i + 1], maps_to, q != -1))
 				{
 					item += str.substr(last_nonspace, i - last_nonspace);
+					if (maps_to) item += maps_to;
 					i++;
 					last_nonspace = i + 1;
 					continue;
@@ -1818,6 +1949,16 @@ namespace utils
 			if (!split_and_substitute(key, &c, value, sc, &c.referenced_variables, splitted))
 			{
 				return;
+			}
+
+			if (key.find("${") != std::string::npos || key.find("$\"") != std::string::npos)
+			{
+				variant v;
+				if (!split_and_substitute(key, &c, key, sc, &c.referenced_variables, v))
+				{
+					return;
+				}
+				key = v.as<std::string>();
 			}
 
 			if (c.section_mode())
@@ -2332,7 +2473,7 @@ namespace utils
 	void ini_parser::finalize_end() const
 	{
 		data_->resolve_sequential();
-		if (lua_state.ptr && !lua_state.is_clean)
+		if (lua_state.ptr && (!lua_state.is_clean || lua_state.used > 40))
 		{
 			lua_close(lua_state.ptr);
 			lua_state.ptr = nullptr;

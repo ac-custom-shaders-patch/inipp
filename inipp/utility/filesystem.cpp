@@ -135,6 +135,14 @@ namespace utils
 		return CreateDirectoryW(path.wstring().c_str(), nullptr) != 0;
 	}
 
+	std::string read(const path& path)
+	{
+		const std::ifstream file(path.wstring(), std::ios::binary);
+		std::stringstream buffer;
+		buffer << file.rdbuf();
+		return buffer.str();
+	}
+
 	long long get_file_size(const path& path)
 	{
 		WIN32_FIND_DATAW data;

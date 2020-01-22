@@ -50,6 +50,7 @@ namespace utils
 		static std::string to_ini(const std::unordered_map<std::string, section>& sections);
 		static std::string to_json(const std::unordered_map<std::string, section>& sections, bool format = false);
 		static void leaks_check(void(*callback)(const char*, long));
+		static void reset_expressions_state();
 
 	private:
 		struct ini_parser_data* data_;

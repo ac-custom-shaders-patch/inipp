@@ -2685,10 +2685,15 @@ class lexer
 			{"zwnj;", u8"\xE2\x80\x8C"}
 		};
 
+#ifdef USE_SIMPLE
+		return nullptr;
+#else
+
 		const auto* const* entity = (const char *const *)bsearch(name,
 			NAMED_ENTITIES, sizeof NAMED_ENTITIES / sizeof *NAMED_ENTITIES,
 			sizeof *NAMED_ENTITIES, cmp);
 		return entity ? entity[1] : nullptr;
+#endif
 	}
 
 	static size_t putc_utf8(unsigned long cp, char* buffer)

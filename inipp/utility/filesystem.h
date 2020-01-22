@@ -24,13 +24,9 @@ namespace utils
 	{
 	public:
 		path() {}
-
 		path(const char* data) : data_(data) {}
-
 		path(const wchar_t* data) : data_(utf16_to_utf8(data)) {}
-
 		path(std::string data) : data_(std::move(data)) {}
-
 		path(const std::wstring& data) : data_(utf16_to_utf8(data)) {}
 
 		bool operator==(const path& other) const;
@@ -92,6 +88,7 @@ namespace utils
 
 	bool exists(const path& path);
 	bool create_dir(const path& path);
+	std::string read(const path& path);
 	long long get_file_size(const path& path);
 	path resolve(const path& filename, const std::vector<path>& paths);
 	path absolute(const path& filename, const path& parent_path);
