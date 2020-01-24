@@ -16,8 +16,140 @@
 
 namespace utils
 {
+	/*struct creating_section_vec
+	{
+		typedef std::pair<std::string, variant> item;
+		std::vector<item> values;
+
+		creating_section_vec()
+		{
+			values.reserve(24);
+		}
+
+		void set(const std::string& k, const variant& v)
+		{
+			erase(k);
+			values.emplace_back(k, v);
+		}
+
+		std::vector<item>::const_iterator find(const std::string& a) const
+		{
+			auto iter = values.end();
+			while (iter != values.begin())
+			{
+				--iter;
+				if (iter->first == a) return iter;
+			}
+			return values.end();
+		}
+
+		std::vector<item>::const_iterator end() const
+		{
+			return values.end();
+		}
+
+		variant& get(const std::string& a)
+		{
+			for (auto i = int(values.size()) - 1; i >= 0; --i)
+			{
+				if (values[i].first == a) return values[i].second;
+			}
+
+			set(a, variant());
+			return values[values.size() - 1].second;
+		}
+
+		void erase(const std::string& a)
+		{
+			values.erase(
+				std::remove_if(values.begin(), values.end(),
+					[=](const item& o) { return o.first == a; }),
+				values.end());
+		}
+
+		void clear()
+		{
+			values.clear();
+		}
+
+		bool empty() const
+		{
+			return values.empty();
+		}
+
+		size_t fingerprint() const
+		{
+			size_t ret{};
+			for (const auto& p : values)
+			{
+				auto r = std::hash<std::string>{}(p.first);
+				for (const auto& v : p.second)
+				{
+					r = (r * 397) ^ std::hash<std::string>{}(v);
+				}
+				ret ^= r;
+			}
+			return ret;
+		}
+	};*/
+
+	struct creating_section
+	{
+		typedef std::pair<std::string, variant> item;
+		std::map<std::string, variant> values;
+
+		void set(const std::string& k, const variant& v)
+		{
+			values[k] = v;
+		}
+
+		auto find(const std::string& a) const
+		{
+			return values.find(a);
+		}
+
+		auto end() const
+		{
+			return values.end();
+		}
+
+		variant& get(const std::string& a)
+		{
+			return values[a];
+		}
+
+		void erase(const std::string& a)
+		{
+			values.erase(a);
+		}
+
+		void clear()
+		{
+			values.clear();
+		}
+
+		bool empty() const
+		{
+			return values.empty();
+		}
+
+		size_t fingerprint() const
+		{
+			size_t ret{};
+			for (const auto& p : values)
+			{
+				auto r = std::hash<std::string>{}(p.first);
+				for (const auto& v : p.second)
+				{
+					r = (r * 397) ^ std::hash<std::string>{}(v);
+				}
+				ret ^= r;
+			}
+			return ret;
+		}
+	};
+
 	using resulting_section = std::unordered_map<std::string, variant>;
-	using creating_section = std::map<std::string, variant>;
 	using template_section = std::vector<std::pair<std::string, variant>>;
 
 	template <typename TValue>
@@ -571,7 +703,7 @@ namespace utils
 		bool process_values;
 
 		value_finalizer(std::string key, bool& include_value, variant& dest, const script_params* params, bool process_values = true)
-			: key(std::move(key)), include_value(include_value), dest(dest), params(params), process_values(process_values) { }
+			: key(std::move(key)), dest(dest), params(params), include_value(include_value), process_values(process_values) { }
 
 		static std::string fix_expression(const std::string& expr)
 		{
@@ -1264,7 +1396,6 @@ namespace utils
 			: section_key(std::move(key))
 		{
 			counters.current_sections++;
-			target_section.
 		}
 
 		current_section_info(std::string key, std::vector<std::shared_ptr<section_template>> templates)
@@ -1366,21 +1497,6 @@ namespace utils
 			trim_self(inc);
 			const auto name = path(inc).filename().string() + std::to_string(vars_fingerprint);
 			processed_files.push_back(name);
-		}
-
-		static size_t vars_fingerprint(const creating_section& vars)
-		{
-			size_t ret{};
-			for (const auto& p : vars)
-			{
-				auto r = std::hash<std::string>{}(p.first);
-				for (const auto& v : p.second)
-				{
-					r = (r * 397) ^ std::hash<std::string>{}(v);
-				}
-				ret ^= r;
-			}
-			return ret;
 		}
 
 		path find_referenced(const std::string& file_name, const size_t vars_fingerprint)
@@ -1495,7 +1611,7 @@ namespace utils
 					variant v;
 					if (substitute_variable_array(param_key, v0.second, gen_scope, &referenced_variables, v))
 					{
-						gen_scope->explicit_values[param_key] = v;
+						gen_scope->explicit_values.set(param_key, v);
 					}
 				}
 			}
@@ -1511,7 +1627,7 @@ namespace utils
 				for (auto i = 0, n = repeats[repeats_phase]; i < n; i++)
 				{
 					auto gen_scope = scope->inherit();
-					gen_scope->explicit_values[std::to_string(repeats_phase + 1)] = i + 1;
+					gen_scope->explicit_values.set(std::to_string(repeats_phase + 1), i + 1);
 					resolve_generator_iteration(t, key, section_key, tpl, gen_scope, referenced_variables, repeats, repeats_phase + 1);
 				}
 			}
@@ -1548,7 +1664,7 @@ namespace utils
 						variant v;
 						if (substitute_variable_array(set_key, variant((SPECIAL_CALCULATE + set_value).c_str()), scope_own, &referenced_variables, v))
 						{
-							scope_own->explicit_values[set_key] = v;
+							scope_own->explicit_values.set(set_key, v);
 						}
 					}
 					else
@@ -1556,7 +1672,7 @@ namespace utils
 						variant v;
 						if (split_and_substitute(set_key, nullptr, set_value, scope_own, &referenced_variables, v))
 						{
-							scope_own->explicit_values[set_key] = v;
+							scope_own->explicit_values.set(set_key, v);
 						}
 					}
 				}
@@ -1566,7 +1682,7 @@ namespace utils
 					{
 						scope_own = scope->inherit();
 					}
-					scope_own->explicit_values[item] = variant("1");
+					scope_own->explicit_values.set(item, variant("1"));
 				}
 			}
 		}
@@ -1617,7 +1733,7 @@ namespace utils
 			const auto target_found = sc->explicit_values.find("TARGET");
 			if (target_found == sc->explicit_values.end() && !c.section_key.empty())
 			{
-				sc->explicit_values["TARGET"] = c.section_key;
+				sc->explicit_values.set("TARGET", c.section_key);
 			}
 			return sc;
 		}
@@ -1664,7 +1780,7 @@ namespace utils
 				if (is_output)
 				{
 					c.section_key = dest.as<std::string>();
-					sc->explicit_values["TARGET"] = c.section_key;
+					sc->explicit_values.set("TARGET", c.section_key);
 				}
 				else if (is_generator)
 				{
@@ -1689,7 +1805,7 @@ namespace utils
 					}
 
 					key = convert_key_autoinc(key);
-					c.target_section[key] = dest;
+					c.target_section.set(key, dest);
 					set_via_template.push_back(key);
 				}
 			}
@@ -1752,34 +1868,34 @@ namespace utils
 			if (c.section_key == "FUNCTION")
 			{
 				lua_register_function(
-					c.target_section["NAME"].as<std::string>(),
-					c.target_section["ARGUMENTS"],
-					c.target_section["CODE"].as<std::string>(),
-					!c.target_section["PRIVATE"].as<bool>(),
+					c.target_section.get("NAME").as<std::string>(),
+					c.target_section.get("ARGUMENTS"),
+					c.target_section.get("CODE").as<std::string>(),
+					!c.target_section.get("PRIVATE").as<bool>(),
 					current_params.file, current_params.error_handler);
 				c.target_section.clear();
 			}
 			else if (c.section_key == "USE")
 			{
-				const auto name = c.target_section["FILE"].as<std::string>();
+				const auto name = c.target_section.get("FILE").as<std::string>();
 				const auto referenced = find_referenced(name, 0);
-				if (exists(referenced)) lua_import(referenced, !c.target_section["PRIVATE"].as<bool>(), current_params.file, current_params.error_handler);
+				if (exists(referenced)) lua_import(referenced, !c.target_section.get("PRIVATE").as<bool>(), current_params.file, current_params.error_handler);
 				else error("Referenced file is missing: %s", name);
 				c.target_section.clear();
 			}
 			else if (c.section_key.find("INCLUDE") == 0)
 			{
-				auto to_include = c.target_section.find("INCLUDE");
+				const auto to_include = c.target_section.find("INCLUDE");
 				if (to_include != c.target_section.end())
 				{
 					const auto previous_file = current_params.file;
 					auto include_scope = scope->inherit();
 
-					for (const auto& p : c.target_section)
+					for (const auto& p : c.target_section.values)
 					{
 						if (p.first == "INCLUDE") continue;
-						if (p.first.find("VAR") == 0) include_scope->include_params[p.second.as<std::string>()] = p.second.as<variant>(1);
-						else include_scope->include_params[p.first] = p.second;
+						if (p.first.find("VAR") == 0) include_scope->include_params.set(p.second.as<std::string>(), p.second.as<variant>(1));
+						else include_scope->include_params.set(p.first, p.second);
 					}
 
 					// It’s important to copy values and clear section before parsing included files: those
@@ -1787,7 +1903,7 @@ namespace utils
 					auto values = to_include->second.data();
 					c.target_section.clear();
 
-					const auto vars_fp = vars_fingerprint(include_scope->include_params);
+					const auto vars_fp = include_scope->include_params.fingerprint();
 					for (auto& i : values)
 					{
 						parse_file(find_referenced(i, vars_fp), include_scope, vars_fp);
@@ -1803,8 +1919,8 @@ namespace utils
 				const auto key_active = c.target_section.find("ACTIVE");
 				if (key_active != c.target_section.end() && !key_active->second.as<bool>())
 				{
-					c.target_section = {{"ACTIVE", "0"}};
-					// c.target_section["ACTIVE"] = "0";
+					c.target_section = {};
+					c.target_section.set("ACTIVE", "0");
 				}
 
 				sections.push_back({c.section_key, c.target_section});
@@ -1975,11 +2091,11 @@ namespace utils
 				{
 					const auto compatible_mode = key.find("VAR") == 0 && !splitted.empty();
 					const auto& actual_key = compatible_mode ? splitted.data()[0] : key;
-					scope->default_values[actual_key] = compatible_mode ? variant(splitted).as<variant>(1) : splitted;
+					scope->default_values.set(actual_key, compatible_mode ? variant(splitted).as<variant>(1) : splitted);
 				}
 				else if (c.section_key == "INCLUDE" && key == "INCLUDE")
 				{
-					auto& existing = c.target_section[key];
+					auto& existing = c.target_section.get(key);
 					for (const auto& piece : splitted)
 					{
 						existing.data().push_back(piece);
@@ -1987,7 +2103,7 @@ namespace utils
 				}
 				else if (new_key)
 				{
-					c.target_section[convert_key_autoinc(key)] = splitted;
+					c.target_section.set(convert_key_autoinc(key), splitted);
 				}
 			}
 			else
@@ -2064,7 +2180,7 @@ namespace utils
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
 					cs.push_back(std::make_unique<current_section_info>(final_name));
-					for (const auto& s : cs) s->target_section["INCLUDE"] = file;
+					for (const auto& s : cs) s->target_section.set("INCLUDE", file);
 					return;
 				}
 
@@ -2073,7 +2189,7 @@ namespace utils
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
 					cs.push_back(std::make_unique<current_section_info>(final_name));
-					for (const auto& s : cs) s->target_section["NAME"] = file;
+					for (const auto& s : cs) s->target_section.set("NAME", file);
 					return;
 				}
 
@@ -2082,7 +2198,7 @@ namespace utils
 					auto file = cs_keys.substr(separator + 1);
 					trim_self(file);
 					cs.push_back(std::make_unique<current_section_info>(final_name));
-					for (const auto& s : cs) s->target_section["FILE"] = file;
+					for (const auto& s : cs) s->target_section.set("FILE", file);
 					return;
 				}
 
@@ -2251,21 +2367,18 @@ namespace utils
 				{
 					if ((c == '"' || c == '\'') && !status.key.empty())
 					{
-						if (status.end_at == -1)
-						{
-							if (status.started == -1 || is_quote_working(data, status.started, i))
-							{
-								status.end_at = c;
-								if (status.started == -1)
-								{
-									status.started = i;
-									status.started_solid = false;
-								}
-							}
-						}
-						else if (c == status.end_at && (data[i - 1] != '\\' || data[i - 2] == '\\'))
+						if (c == status.end_at && (data[i - 1] != '\\' || data[i - 2] == '\\'))
 						{
 							status.end_at = -1;
+						}
+						else if (status.end_at == -1 && (status.started == -1 || is_quote_working(data, status.started, i)))
+						{
+							status.end_at = c;
+							if (status.started == -1)
+							{
+								status.started = i;
+								status.started_solid = false;
+							}
 						}
 					}
 					non_space = i;
@@ -2296,7 +2409,7 @@ namespace utils
 		static resulting_section resolve_sequential_keys(creating_section& s)
 		{
 			resulting_section ret;
-			for (const auto& p : s)
+			for (const auto& p : s.values)
 			{
 				const auto x = p.first.find(SPECIAL_KEY_AUTOINCREMENT);
 				if (x == std::string::npos)
@@ -2340,9 +2453,9 @@ namespace utils
 				auto existing = temp_map.find(key);
 				if (existing != temp_map.end())
 				{
-					for (auto& r : p.second)
+					for (auto& r : p.second.values)
 					{
-						existing->second[r.first] = r.second;
+						existing->second.set(r.first, r.second);
 					}
 				}
 				else

@@ -182,6 +182,8 @@ void do_debug_run()
 			auto filename = utils::path(entry.path().native());
 			if (filename.filename().string()[2] != '_') continue;
 
+			const auto file_size = double(get_file_size(filename));
+
 			std::cout << STYLE_QUEUE << u8"• Measuring performance of " << filename.filename_without_extension().string().substr(3) << u8"… " << rang::style::reset;
 			caching_reader reader;
 			if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
@@ -202,7 +204,8 @@ void do_debug_run()
 				}
 				const auto taken_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
 				const auto taken_ms = double(taken_ns) / 1e6 / double(run_count);
-				std::cout << STYLE_INFO << std::fixed << std::setprecision(2) << taken_ms << u8" ms" << rang::style::reset << " ";
+				const auto speed = 1e3 * (file_size / 1024 / 1024) / taken_ms;
+				std::cout << STYLE_INFO << std::fixed << std::setprecision(2) << taken_ms << " ms (" << speed << " MB/s)" << rang::style::reset << " ";
 			}
 
 			std::cout << std::endl;
