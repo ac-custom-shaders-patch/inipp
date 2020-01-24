@@ -38,9 +38,25 @@ namespace utils
 		return l.find(a);
 	}
 
-	static bool is_space(char c)
+	inline bool is_whitespace(char c)
 	{
 		return c == ' ' || c == '\t' || c == '\r';
+	}
+
+	inline bool is_special_symbol(char c, char& maps_to, bool quoted)
+	{
+		switch (c)
+		{
+			case '\n': maps_to = 0;
+				return true;
+			case 'n': maps_to = '\n';
+				return true;
+			case 't': maps_to = '\t';
+				return true;
+			case 'r': maps_to = '\r';
+				return true;
+			default: return false;
+		}
 	}
 
 	static void trim_self(std::string& str, const char* chars = " \t\r")
@@ -877,7 +893,7 @@ namespace utils
 			for (auto i = 0U; i < s.size(); i++)
 			{
 				const auto c = s[i];
-				if (is_space(c))
+				if (is_whitespace(c))
 				{
 					if (started) ended = true;
 					continue;
@@ -1248,6 +1264,7 @@ namespace utils
 			: section_key(std::move(key))
 		{
 			counters.current_sections++;
+			target_section.
 		}
 
 		current_section_info(std::string key, std::vector<std::shared_ptr<section_template>> templates)
@@ -1462,7 +1479,7 @@ namespace utils
 					auto is_param = true;
 					for (auto j = key.size(); j < v0_sep; j++)
 					{
-						if (!is_space(v0.first[j]))
+						if (!is_whitespace(v0.first[j]))
 						{
 							is_param = false;
 						}
@@ -1794,27 +1811,6 @@ namespace utils
 			}
 		}
 
-		static bool is_whitespace(char c)
-		{
-			return c == ' ' || c == '\t' || c == '\r';
-		}
-
-		static bool is_special_symbol(char c, char& maps_to, bool quoted)
-		{
-			switch (c)
-			{
-				case '\n': maps_to = 0;
-					return true;
-				case 'n': maps_to = '\n';
-					return true;
-				case 't': maps_to = '\t';
-					return true;
-				case 'r': maps_to = '\r';
-					return true;
-				default: return false;
-			}
-		}
-
 		static variant split_string_quotes(const std::string& str, bool consider_inline_params)
 		{
 			variant result;
@@ -1832,7 +1828,7 @@ namespace utils
 			for (auto i = 0, t = int(str.size()); i < t; i++)
 			{
 				const auto c = str[i];
-				
+
 				if (c == '\\' && i < t - 1 && (str[i + 1] == '\n' || (str[i + 1] == '"' || str[i + 1] == '\'') && (item.empty() || q != -1) || str[i + 1] == ','))
 				{
 					item += str.substr(last_nonspace, i - last_nonspace);
@@ -2209,111 +2205,74 @@ namespace utils
 
 			parse_status status;
 			auto non_space = -1;
+			auto consume_comment = false;
 
 			for (auto i = 0; i < data_size; i++)
 			{
 				const auto c = data[i];
-				switch (c)
+				if (consume_comment || is_whitespace(c) || status.end_at != -1 && c != status.end_at)
 				{
-					case '[':
+					if (c == '\n') consume_comment = false;
+				}
+				else if (c == '\n' && !(non_space > 0 && data[non_space] == '\\'))
+				{
+					parse_ini_finish(cs, data, non_space, status, false, scope);
+				}
+				else if (status.started_solid)
+				{
+					non_space = i;
+				}
+				else if (c == ';' || c == '/' && i + 1 < data_size && data[i + 1] == '/')
+				{
+					parse_ini_finish(cs, data, non_space, status, false, scope);
+					consume_comment = true;
+				}
+				else if (c == '[')
+				{
+					parse_ini_finish(cs, data, non_space, status, true, scope);
+					const auto s = ++i;
+					if (s == data_size) continue;
+					for (; i < data_size && data[i] != ']'; i++) {}
+					auto cs_keys = std::string(&data[s], i - s);
+					cs.clear();
+					set_sections(cs, cs_keys, scope);
+				}
+				else if (c == '=')
+				{
+					if (status.started != -1 && status.key.empty() && !cs.empty())
 					{
-						if (status.end_at != -1 || status.started_solid) goto LAB_DEF;
-						parse_ini_finish(cs, data, non_space, status, true, scope);
-
-						const auto s = ++i;
-						if (s == data_size) break;
-						for (; i < data_size && data[i] != ']'; i++) {}
-						auto cs_keys = std::string(&data[s], i - s);
-						cs.clear();
-						set_sections(cs, cs_keys, scope);
-						break;
+						status.key = std::string(&data[status.started], 1 + non_space - status.started);
+						status.started = -1;
+						status.started_solid = false;
+						status.end_at = -1;
 					}
-
-					case '\n':
+				}
+				else
+				{
+					if ((c == '"' || c == '\'') && !status.key.empty())
 					{
-						if (status.end_at != -1) goto LAB_DEF;
-						if (non_space > 0 && data[non_space] == '\\') goto LAB_DEF;
-						parse_ini_finish(cs, data, non_space, status, false, scope);
-						break;
-					}
-
-					case '=':
-					{
-						if (status.end_at != -1 || status.started_solid) goto LAB_DEF;
-						if (status.started != -1 && status.key.empty() && !cs.empty())
+						if (status.end_at == -1)
 						{
-							status.key = std::string(&data[status.started], 1 + non_space - status.started);
-							status.started = -1;
-							status.started_solid = false;
-							status.end_at = -1;
-						}
-						break;
-					}
-
-					case '/':
-					{
-						if (status.end_at != -1 || status.started_solid) goto LAB_DEF;
-						if (i + 1 < data_size && data[i + 1] == '/')
-						{
-							goto LAB_SEMIC;
-						}
-						goto LAB_DEF;
-					}
-
-					case ';':
-					{
-						if (status.end_at != -1 || status.started_solid) goto LAB_DEF;
-					LAB_SEMIC:
-						parse_ini_finish(cs, data, non_space, status, false, scope);
-						for (i++; i < data_size && data[i] != '\n'; i++) {}
-						break;
-					}
-
-					case '"':
-					case '\'':
-					{
-						if (!status.key.empty())
-						{
-							if (status.end_at == -1)
+							if (status.started == -1 || is_quote_working(data, status.started, i))
 							{
-								if (status.started != -1 && !is_quote_working(data, status.started, i))
-								{
-									goto LAB_DEF;
-								}
-
 								status.end_at = c;
 								if (status.started == -1)
 								{
 									status.started = i;
 									status.started_solid = false;
-									non_space = i;
 								}
 							}
-							else if (c == status.end_at)
-							{
-								if (data[i - 1] == '\\' && data[i - 2] != '\\')
-								{
-									goto LAB_DEF;
-								}
-
-								status.end_at = -1;
-							}
+						}
+						else if (c == status.end_at && (data[i - 1] != '\\' || data[i - 2] == '\\'))
+						{
+							status.end_at = -1;
 						}
 					}
-
-					default:
+					non_space = i;
+					if (status.started == -1)
 					{
-					LAB_DEF:
-						if (!is_whitespace(c))
-						{
-							non_space = i;
-							if (status.started == -1)
-							{
-								status.started = i;
-								status.started_solid = c == 'd' && is_solid(data, i);
-							}
-						}
-						break;
+						status.started = i;
+						status.started_solid = c == 'd' && is_solid(data, i);
 					}
 				}
 			}
