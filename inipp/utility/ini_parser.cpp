@@ -504,7 +504,6 @@ namespace utils
 				include_value = false;
 				return;
 			}
-			DBG(expr, error_msg)
 			if (handler) handler->on_error(file, (error_msg + "\nKey: " + key + "\nCommand: " + expr).c_str());
 			if (!prefix.empty() || !postfix.empty()) dest.data().push_back(prefix + postfix);
 			return;
