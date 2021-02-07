@@ -122,8 +122,7 @@ struct str_view
 
 	const char* data() const
 	{
-		_assert(length_ > 0);
-		return &data_[start_];
+		return length_ > 0 ? &data_[start_] : "";
 	}
 
 	bool operator==(const str_view& o) const
@@ -137,19 +136,19 @@ struct str_view
 		return N == 1 ? empty() : length_ == N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_], cs);
 	}
 
-	std::vector<str_view> split(char separator, bool skip_empty, bool trim_result)
+	std::vector<str_view> split(char separator, bool skip_empty, bool trim_result) const
 	{
 		std::vector<str_view> result;
-		auto index = 0;
-		const auto size = int(this->size());
+		auto index = 0U;
+		const auto size = this->size();
 		while (index < size)
 		{
 			auto next = find_first_of(separator, index);
-			if (next == std::string::npos) next = size_t(size);
-			auto piece = substr(index, next - index);
+			if (next == std::string::npos) next = uint32_t(size);
+			auto piece = substr(index, uint32_t(next) - index);
 			if (trim_result) piece.trim();
 			if (!skip_empty || !piece.empty()) result.push_back(piece);
-			index = int(next) + 1;
+			index = uint32_t(next) + 1;
 		}
 		return result;
 	}
@@ -2427,12 +2426,12 @@ namespace utils
 			auto is_mixin = false;
 			if (separator != std::string::npos)
 			{
-				final_name = cs_keys.substr(0, separator);
+				final_name = cs_keys.substr(0U, uint32_t(separator));
 				final_name.trim();
 
 				if (final_name == "INCLUDE")
 				{
-					auto file = cs_keys.substr(separator + 1);
+					auto file = cs_keys.substr(uint32_t(separator + 1));
 					file.trim();
 					cs.push_back(std::make_unique<current_section_info>(final_name));
 					for (const auto& s : cs) s->target_section.set("INCLUDE", file);
@@ -2441,7 +2440,7 @@ namespace utils
 
 				if (final_name == "FUNCTION")
 				{
-					auto file = cs_keys.substr(separator + 1);
+					auto file = cs_keys.substr(uint32_t(separator + 1));
 					file.trim();
 					cs.push_back(std::make_unique<current_section_info>(final_name));
 					for (const auto& s : cs) s->target_section.set("NAME", file);
@@ -2450,7 +2449,7 @@ namespace utils
 
 				if (final_name == "USE")
 				{
-					auto file = cs_keys.substr(separator + 1);
+					auto file = cs_keys.substr(uint32_t(separator + 1));
 					file.trim();
 					cs.push_back(std::make_unique<current_section_info>(final_name));
 					for (const auto& s : cs) s->target_section.set("FILE", file);
@@ -2459,7 +2458,7 @@ namespace utils
 
 				is_template = final_name == "TEMPLATE";
 				is_mixin = final_name == "MIXIN";
-				cs_keys = cs_keys.substr(separator + 1);
+				cs_keys = cs_keys.substr(uint32_t(separator + 1));
 			}
 
 			auto section_names = cs_keys.split(',', true, true);
@@ -2534,11 +2533,19 @@ namespace utils
 
 			std::vector<std::shared_ptr<section_template>> referenced_templates;
 
-			auto section_names_inv = section_names;
-			std::reverse(section_names_inv.begin(), section_names_inv.end());
+			std::vector<std::string> section_names_str;
+			std::vector<std::string*> section_names_inv;
+			section_names_str.reserve(section_names.size());
+			section_names_inv.resize(section_names.size());
+			for (const auto& cs_key : section_names)
+			{
+				section_names_str.push_back(cs_key.str());
+				section_names_inv[section_names.size() - section_names_str.size()] = &*section_names_str.rbegin();
+			}
+			
 			for (const auto& section_name : section_names_inv)
 			{
-				auto found_template = templates_map.find(section_name.str()); // TODO
+				auto found_template = templates_map.find(*section_name);
 				if (found_template != templates_map.end())
 				{
 					add_template(referenced_templates, found_template->second);
@@ -2551,11 +2558,11 @@ namespace utils
 				return;
 			}
 
-			for (const auto& cs_key : section_names)
+			for (auto& cs_key : section_names_str)
 			{
-				cs.push_back(std::make_unique<current_section_info>(cs_key));
+				cs.push_back(std::make_unique<current_section_info>(std::move(cs_key)));
 			}
-		}
+		} 
 
 		static bool is_quote_working(const char* data, const int from, const int to, const bool allow_$ = true)
 		{
