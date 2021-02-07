@@ -191,10 +191,10 @@ void do_debug_run()
 				throw std::runtime_error("Unexpected");
 			}
 
-			for (auto j = 0; j < 4; j++)
+			for (auto j = 0; j < 6; j++)
 			{
 				const auto start = std::chrono::high_resolution_clock::now();
-				const auto run_count = 20;
+				const auto run_count = 100;
 				for (auto i = 0; i < run_count; i++)
 				{
 					if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
@@ -203,9 +203,9 @@ void do_debug_run()
 					}
 				}
 				const auto taken_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
-				const auto taken_ms = double(taken_ns) / 1e6 / double(run_count);
-				const auto speed = 1e3 * (file_size / 1024 / 1024) / taken_ms;
-				std::cout << STYLE_INFO << std::fixed << std::setprecision(2) << taken_ms << " ms (" << speed << " MB/s)" << rang::style::reset << " ";
+				const auto taken_s = double(taken_ns) / 1e9; 
+				const auto speed = double(run_count) * file_size / 1024 / 1024 / taken_s;
+				std::cout << STYLE_INFO << std::fixed << std::setprecision(2) << speed << " MB/s" << rang::style::reset << " ";
 			}
 
 			std::cout << std::endl;

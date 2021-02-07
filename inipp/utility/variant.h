@@ -24,6 +24,8 @@ namespace utils
 		variant(const wchar_t* value);
 		variant(const std::vector<std::string>&& values);
 		variant(const std::vector<std::wstring>&& values);
+		variant(std::string value) { values_.push_back(std::move(value)); }
+		variant(const std::wstring& value) : values_(1, utf16_to_utf8(value)) {}
 
 		template <typename T>
 		variant(T value)
@@ -35,18 +37,6 @@ namespace utils
 
 		template <>
 		variant(const bool& value) : variant(value ? "1" : "0") { }
-
-		template <>
-		variant(const std::string& value) : values_(1, value) { }
-
-		template <>
-		variant(const std::wstring& value) : values_(1, utf16_to_utf8(value)) { }
-
-		template <>
-		variant(std::string value) : values_(1, value) { }
-
-		template <>
-		variant(std::wstring value) : values_(1, utf16_to_utf8(value)) { }
 
 		template <>
 		variant(std::vector<std::string> values) : values_(std::move(values)) { }
@@ -139,7 +129,7 @@ namespace utils
 		uint64_t as(size_t i) const { return as_uint64_t(i); }
 
 		template <>
-		float as(size_t i) const { return float(as_double(i)); }
+		float as(size_t i) const { return as_float(i); }
 
 		template <>
 		double as(size_t i) const { return as_double(i); }
@@ -156,6 +146,12 @@ namespace utils
 		#ifndef USE_SIMPLE
 		template <>
 		math::uint2 as(size_t i) const { return as_uint2(i); }
+		
+		template <>
+		math::uint3 as(size_t i) const { return as_uint3(i); }
+		
+		template <>
+		math::uint4 as(size_t i) const { return as_uint4(i); }
 
 		template <>
 		math::float2 as(size_t i) const { return as_float2(i); }
@@ -165,6 +161,15 @@ namespace utils
 
 		template <>
 		math::float4 as(size_t i) const { return as_float4(i); }
+
+		template <>
+		math::int2 as(size_t i) const { return as_int2(i); }
+
+		template <>
+		math::int3 as(size_t i) const { return as_int3(i); }
+
+		template <>
+		math::int4 as(size_t i) const { return as_int4(i); }
 
 		template <>
 		math::rgb as(size_t i) const { return as_rgbm(i).to_rgb(); }
@@ -180,11 +185,17 @@ namespace utils
 		uint64_t as_uint64_t(size_t i) const;
 		int64_t as_int64_t(size_t i) const;
 		double as_double(size_t i) const;
+		float as_float(size_t i) const;
 		const std::string& as_string(size_t i) const;
 		std::wstring as_wstring(size_t i) const;
 
 		#ifndef USE_SIMPLE
+		math::int2 as_int2(size_t i) const;
+		math::int3 as_int3(size_t i) const;
+		math::int4 as_int4(size_t i) const;
 		math::uint2 as_uint2(size_t i) const;
+		math::uint3 as_uint3(size_t i) const;
+		math::uint4 as_uint4(size_t i) const;
 		math::float2 as_float2(size_t i) const;
 		math::float3 as_float3(size_t i) const;
 		math::float4 as_float4(size_t i) const;

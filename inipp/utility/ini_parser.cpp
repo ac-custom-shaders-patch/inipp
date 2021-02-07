@@ -5,6 +5,7 @@
 #include <lua.hpp>
 #include <utility/alphanum.h>
 #include <utility/json.h>
+#include <utility/string_parse.h>
 #include <utility/variant.h>
 #include <utility>
 
@@ -12,95 +13,203 @@
 #define DBG(v) std::cout << "[" << __func__ << ":" << __LINE__ << "] " << #v << "=" << (v) << '\n';
 #define LOG(v) std::cerr
 #define HERE std::cout << __FILE__ << ":" << __func__ << ":" << __LINE__ <<  '\n';
+#define FATAL_CRASH(x) exit(1)
+#define _assert(x) assert(x)
 #endif
+
+inline bool is_whitespace(char c)
+{
+	return c == ' ' || c == '\t' || c == '\r';
+}
+
+struct str_view
+{
+	str_view() {}
+
+	template <std::size_t N>
+	explicit str_view(char const (&cs)[N])
+		: data_(cs), data_size_(uint32_t(N - 1)), length_(uint32_t(N - 1)) { }
+
+	explicit str_view(const std::string& data)
+		: str_view(data, 0U, uint32_t(data.size())) { }
+
+	str_view(const std::string& data, uint32_t start)
+		: str_view(data, start, uint32_t(data.size())) { }
+
+	str_view(const std::string& data, uint32_t start, uint32_t length)
+		: str_view(data.c_str(), uint32_t(data.size()), start, length) {}
+
+	str_view(const char* data, uint32_t data_size, uint32_t start, uint32_t length)
+		: data_(data), data_size_(data_size), start_(start), length_(length)
+	{
+		if (start_ + length_ > data_size)
+		{
+			length_ = data_size > start_ ? data_size - start_ : 0;
+		}
+	}
+
+	size_t find_first_of(char c, uint32_t index = 0U) const
+	{
+		for (auto i = index; i < length_; ++i)
+		{
+			if (data_[start_ + i] == c) return i;
+		}
+		return std::string::npos;
+	}
+
+	char operator[](uint32_t index) const
+	{
+		return data_[start_ + index];
+	}
+
+	void trim()
+	{
+		for (; length_ > 0U && is_whitespace(data_[start_ + length_ - 1]); --length_) {}
+		for (; length_ > 0U && is_whitespace(data_[start_]); ++start_, --length_) {}
+	}
+
+	bool empty() const { return length_ == 0U; }
+
+	str_view substr(uint32_t offset) const
+	{
+		if (offset >= length_) return {};
+		return {data_, data_size_, start_ + offset, length_ - offset};
+	}
+
+	str_view substr(uint32_t offset, uint32_t length) const
+	{
+		if (offset >= length_) return {};
+		return {data_, data_size_, start_ + offset, std::min(length, length_ - offset)};
+	}
+
+	template <std::size_t N>
+	bool equals(char const (&cs)[N]) const
+	{
+		return N == 1 ? empty() : length_ == N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_], cs);
+	}
+
+	template <std::size_t N>
+	bool starts_with(char const (&cs)[N]) const
+	{
+		return N == 1 || length_ >= N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_], cs);
+	}
+
+	template <std::size_t N>
+	bool ends_with(char const (&cs)[N]) const
+	{
+		return N == 1 || length_ >= N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_ + length_ - (N - 1)], cs);
+	}
+
+	uint32_t hash_code() const
+	{
+		if (hash_code_ == 0)
+		{
+			const auto code = utils::hash_code(&data_[start_], length_);
+			((str_view*)this)->hash_code_ = uint32_t(code >> 32) ^ uint32_t(code);
+		}
+		return hash_code_;
+	}
+
+	uint32_t size() const
+	{
+		return length_;
+	}
+
+	std::string str() const
+	{
+		return length_ ? std::string(&data_[start_], length_) : std::string();
+	}
+
+	const char* data() const
+	{
+		_assert(length_ > 0);
+		return &data_[start_];
+	}
+
+	bool operator==(const str_view& o) const
+	{
+		return size() == o.size() && (empty() || memcmp(&data_[start_], &o.data_[o.start_], length_) == 0);
+	}
+	
+	template <std::size_t N>
+	bool operator==(char const (&cs)[N]) const
+	{
+		return N == 1 ? empty() : length_ == N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_], cs);
+	}
+
+	std::vector<str_view> split(char separator, bool skip_empty, bool trim_result)
+	{
+		std::vector<str_view> result;
+		auto index = 0;
+		const auto size = int(this->size());
+		while (index < size)
+		{
+			auto next = find_first_of(separator, index);
+			if (next == std::string::npos) next = size_t(size);
+			auto piece = substr(index, next - index);
+			if (trim_result) piece.trim();
+			if (!skip_empty || !piece.empty()) result.push_back(piece);
+			index = int(next) + 1;
+		}
+		return result;
+	}
+
+	struct hash_fn
+	{
+		size_t operator()(const str_view& pos) const
+		{
+			return pos.hash_code();
+		}
+	};
+
+private:
+	const char* data_{};
+	uint32_t data_size_{};
+	uint32_t start_{};
+	uint32_t length_{};
+	uint32_t hash_code_{};
+};
+
+std::string& operator +=(std::string& l, const str_view& r)
+{
+	if (r.size() > 0U)
+	{
+		const auto l_size = l.size();
+		l.resize(l_size + r.size());
+		memcpy(&l[l_size], r.data(), r.size());
+	}
+	return l;
+}
+
+typedef std::vector<str_view> variant_sv;
+
+namespace std
+{
+	template <>
+	struct less<str_view>
+	{
+		bool operator()(const str_view& lhs, const str_view& rhs) const
+		{
+			return lhs.hash_code() < rhs.hash_code();
+		}
+	};
+}
 
 namespace utils
 {
-	/*struct creating_section_vec
-	{
-		typedef std::pair<std::string, variant> item;
-		std::vector<item> values;
-
-		creating_section_vec()
-		{
-			values.reserve(24);
-		}
-
-		void set(const std::string& k, const variant& v)
-		{
-			erase(k);
-			values.emplace_back(k, v);
-		}
-
-		std::vector<item>::const_iterator find(const std::string& a) const
-		{
-			auto iter = values.end();
-			while (iter != values.begin())
-			{
-				--iter;
-				if (iter->first == a) return iter;
-			}
-			return values.end();
-		}
-
-		std::vector<item>::const_iterator end() const
-		{
-			return values.end();
-		}
-
-		variant& get(const std::string& a)
-		{
-			for (auto i = int(values.size()) - 1; i >= 0; --i)
-			{
-				if (values[i].first == a) return values[i].second;
-			}
-
-			set(a, variant());
-			return values[values.size() - 1].second;
-		}
-
-		void erase(const std::string& a)
-		{
-			values.erase(
-				std::remove_if(values.begin(), values.end(),
-					[=](const item& o) { return o.first == a; }),
-				values.end());
-		}
-
-		void clear()
-		{
-			values.clear();
-		}
-
-		bool empty() const
-		{
-			return values.empty();
-		}
-
-		size_t fingerprint() const
-		{
-			size_t ret{};
-			for (const auto& p : values)
-			{
-				auto r = std::hash<std::string>{}(p.first);
-				for (const auto& v : p.second)
-				{
-					r = (r * 397) ^ std::hash<std::string>{}(v);
-				}
-				ret ^= r;
-			}
-			return ret;
-		}
-	};*/
-
 	struct creating_section
 	{
 		typedef std::pair<std::string, variant> item;
 		std::map<std::string, variant> values;
 
-		void set(const std::string& k, const variant& v)
+		void set(const std::string& k, variant v)
 		{
-			values[k] = v;
+			values[k] = std::move(v);
+		}
+
+		void set(const std::string& k, str_view v)
+		{
+			values[k] = v.str(); // TODO
 		}
 
 		auto find(const std::string& a) const
@@ -224,19 +333,9 @@ namespace utils
 		return result;
 	}
 
-	inline bool matches_from(const std::string& s, int index, const char* c)
+	inline bool is_solid(const str_view& s)
 	{
-		const auto z = int(s.size());
-		for (auto h = c; *h; h++)
-		{
-			if (index >= z || s[index++] != *h) return false;
-		}
-		return true;
-	}
-
-	inline bool is_solid(const std::string& s, int index)
-	{
-		return index >= 0 && matches_from(s, index, "data:image/png;base64,");
+		return s.starts_with("data:image/png;base64,");
 	}
 
 	inline bool is_identifier_part(char c)
@@ -401,27 +500,30 @@ namespace utils
 		ini_parser_error_handler* error_handler{};
 		bool allow_includes = false;
 		bool allow_override = true;
-		bool allow_lua = true;
+		bool allow_lua = false;
 		bool erase_referenced = false;
 
 		script_params() = default;
 		script_params(const script_params& other) = delete;
 		script_params& operator=(const script_params& other) = delete;
 	};
+	
+	#define SPECIAL_CALCULATE_STR "[[SPEC:CALCULATE:"
+	#define SPECIAL_END_STR ":SPEC]]"
 
 	static const uint32_t SPECIAL_AUTOINCREMENT_LIMIT = 10000;
 	static const int SPECIAL_RANGE_LIMIT = 10000;
 	static const std::string SPECIAL_KEY_AUTOINCREMENT = "[[SPEC:INC]]";
 	static const std::string SPECIAL_MISSING_VARIABLE = "[[SPEC:MISSING:";
-	static const std::string SPECIAL_CALCULATE = "[[SPEC:CALCULATE:";
-	static const std::string SPECIAL_END = ":SPEC]]";
+	static const std::string SPECIAL_CALCULATE = SPECIAL_CALCULATE_STR;
+	static const std::string SPECIAL_END = SPECIAL_END_STR;
 
 	std::string wrap_special(const std::string& special, const std::string& value)
 	{
 		return special + value + SPECIAL_END;
 	}
 
-	static struct
+	static thread_local struct
 	{
 		lua_State* ptr{};
 		bool is_clean{};
@@ -436,6 +538,148 @@ namespace utils
 			lua_close(lua_state.ptr);
 			lua_state.ptr = nullptr;
 		}
+	}
+
+	static ini_parser_data_provider*& global_provider()
+	{
+		static ini_parser_data_provider* value{};
+		return value;
+	}
+
+	static ini_parser_data_provider*& thread_provider()
+	{
+		static thread_local ini_parser_data_provider* value{};
+		return value;
+	}
+
+	disposable ini_parser::set_data_provider(ini_parser_data_provider* provider)
+	{
+		if (!provider) return {};
+		if (thread_provider())
+		{
+			FATAL_CRASH("Provider is set already");
+		}
+		thread_provider() = provider;
+		return {[] { thread_provider() = nullptr; }};
+	}
+
+	disposable ini_parser::set_global_data_provider(ini_parser_data_provider* provider)
+	{
+		if (!provider) return {};
+		if (global_provider())
+		{
+			FATAL_CRASH("Global provider is set already");
+		}
+		global_provider() = provider;
+		return {[] { global_provider() = nullptr; }};
+	}
+
+	disposable ini_parser::set_data_provider_own(ini_parser_data_provider* provider)
+	{
+		if (!provider) return {};
+		if (thread_provider())
+		{
+			FATAL_CRASH("Provider is set already");
+		}
+		thread_provider() = provider;
+		return {
+			[=]
+			{
+				thread_provider() = nullptr;
+				delete provider;
+			}
+		};
+	}
+
+	disposable ini_parser::set_global_data_provider_own(ini_parser_data_provider* provider)
+	{
+		if (!provider) return {};
+		if (global_provider())
+		{
+			FATAL_CRASH("Provider is set already");
+		}
+		global_provider() = provider;
+		return {
+			[=]
+			{
+				global_provider() = nullptr;
+				delete provider;
+			}
+		};
+	}
+
+	static int read_fn(lua_State* L)
+	{
+		/* get number of arguments */
+		const auto n = lua_gettop(L);
+		if (n != 2)
+		{
+			lua_pushstring(L, "load: needs path and default value");
+			lua_error(L);
+			return 0;
+		}
+
+		auto thread = thread_provider();
+		auto global = global_provider();
+		if (!thread && !global)
+		{
+			lua_pushstring(L, "load: data provider is not set");
+			lua_error(L);
+			return 0;
+		}
+
+		try
+		{
+			const auto p = lua_tostring(L, 1);
+			if (p == nullptr)
+			{
+				lua_pushstring(L, "load: path is not a string");
+				lua_error(L);
+				return 0;
+			}
+
+			if (lua_isnumber(L, 2))
+			{
+				auto v = float(lua_tonumber(L, 2));
+				if ((!thread || !thread->read_number(p, v)) && global)
+				{
+					global->read_number(p, v);
+				}
+				lua_pushnumber(L, v);
+				return 1;
+			}
+
+			if (lua_isstring(L, 2))
+			{
+				auto v = std::string(lua_tostring(L, 2));
+				if ((!thread || !thread->read_string(p, v)) && global)
+				{
+					global->read_string(p, v);
+				}
+				lua_pushstring(L, v.c_str());
+				return 1;
+			}
+
+			if (lua_isboolean(L, 2))
+			{
+				auto v = lua_toboolean(L, 2) != 0;
+				if ((!thread || !thread->read_bool(p, v)) && global)
+				{
+					global->read_bool(p, v);
+				}
+				lua_pushboolean(L, v);
+				return 1;
+			}
+		}
+		catch (std::exception& e)
+		{
+			lua_pushstring(L, e.what());
+			lua_error(L);
+			return 0;
+		}
+
+		lua_pushnil(L);
+		return 1;
 	}
 
 	static lua_State* lua_get_state()
@@ -453,6 +697,7 @@ namespace utils
 			luaopen_string(lua_state.ptr);
 			#endif
 			luaL_loadstring(lua_state.ptr, LUA_STD_LUB) || lua_pcall(lua_state.ptr, 0, -1, 0);
+			lua_register(lua_state.ptr, "read", read_fn);
 			lua_state.is_clean = true;
 		}
 		lua_state.used++;
@@ -1237,20 +1482,20 @@ namespace utils
 		{
 			const auto& piece = pieces[i];
 			if (piece.empty() || !islower(piece[0]) && piece[0] != '?') continue;
-			if (piece == "size" || piece == "count") mode = variable_info::special_mode::size;
-			else if (piece == "length") mode = variable_info::special_mode::length;
-			else if (piece == "exists") mode = variable_info::special_mode::exists;
-			else if (piece == "vec2") mode = variable_info::special_mode::vec2;
-			else if (piece == "vec3") mode = variable_info::special_mode::vec3;
-			else if (piece == "vec4") mode = variable_info::special_mode::vec4;
-			else if (piece == "x") mode = variable_info::special_mode::x;
-			else if (piece == "y") mode = variable_info::special_mode::y;
-			else if (piece == "z") mode = variable_info::special_mode::z;
-			else if (piece == "w") mode = variable_info::special_mode::w;
-			else if (piece == "num" || piece == "number") mode = variable_info::special_mode::number;
-			else if (piece == "bool" || piece == "boolean") mode = variable_info::special_mode::boolean;
-			else if (piece == "str" || piece == "string") mode = variable_info::special_mode::string;
-			if (piece == "required" || piece == "?") is_required = true;
+			if (equals(piece, "size") || equals(piece, "count")) mode = variable_info::special_mode::size;
+			else if (equals(piece, "length")) mode = variable_info::special_mode::length;
+			else if (equals(piece, "exists")) mode = variable_info::special_mode::exists;
+			else if (equals(piece, "vec2")) mode = variable_info::special_mode::vec2;
+			else if (equals(piece, "vec3")) mode = variable_info::special_mode::vec3;
+			else if (equals(piece, "vec4")) mode = variable_info::special_mode::vec4;
+			else if (equals(piece, "x")) mode = variable_info::special_mode::x;
+			else if (equals(piece, "y")) mode = variable_info::special_mode::y;
+			else if (equals(piece, "z")) mode = variable_info::special_mode::z;
+			else if (equals(piece, "w")) mode = variable_info::special_mode::w;
+			else if (equals(piece, "num") || equals(piece, "number")) mode = variable_info::special_mode::number;
+			else if (equals(piece, "bool") || equals(piece, "boolean")) mode = variable_info::special_mode::boolean;
+			else if (equals(piece, "str") || equals(piece, "string")) mode = variable_info::special_mode::string;
+			if (equals(piece, "required") || equals(piece, "?")) is_required = true;
 		}
 		if (from == 0)
 		{
@@ -1397,8 +1642,20 @@ namespace utils
 			counters.current_sections++;
 		}
 
+		current_section_info(str_view key)
+			: section_key(key.data(), key.size())
+		{
+			counters.current_sections++;
+		}
+
 		current_section_info(std::string key, std::vector<std::shared_ptr<section_template>> templates)
 			: section_key(std::move(key)), referenced_templates(std::move(templates))
+		{
+			counters.current_sections++;
+		}
+
+		current_section_info(str_view key, std::vector<std::shared_ptr<section_template>> templates)
+			: section_key(key.data(), key.size()), referenced_templates(std::move(templates))
 		{
 			counters.current_sections++;
 		}
@@ -1469,8 +1726,8 @@ namespace utils
 			current_params.error_handler->on_error(current_params.file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
 		}
 
-		ini_parser_data(bool allow_includes = false, const std::vector<path>& resolve_within = {})
-			: resolve_within(resolve_within)
+		ini_parser_data(bool allow_includes = false, std::vector<path> resolve_within = {})
+			: resolve_within(std::move(resolve_within))
 		{
 			current_params.allow_includes = allow_includes;
 		}
@@ -1539,12 +1796,12 @@ namespace utils
 
 		static bool is_inline_param(const std::string& key, const std::string& value)
 		{
-			return (key.find("@MIXIN") == 0 || key == "@" || key.find("@GENERATOR") == 0) && value.find_first_of('=') != std::string::npos;
+			return (starts_with(key, "@MIXIN") || equals(key, "@") || starts_with(key, "@GENERATOR")) && value.find_first_of('=') != std::string::npos;
 		}
 
 		static bool delayed_substitute(current_section_info* c)
 		{
-			return c && (c->section_key == "DEFAULTS" || c->section_key == "INCLUDE" || c->target_template);
+			return c && (equals(c->section_key, "DEFAULTS") || equals(c->section_key, "INCLUDE") || c->target_template);
 		}
 
 		bool substitute_variable_array(const std::string& key, const variant& v, const std::shared_ptr<variable_scope>& sc,
@@ -1565,7 +1822,7 @@ namespace utils
 			return include_value_ret;
 		}
 
-		bool split_and_substitute(const std::string& key, current_section_info* c, const std::string& value, const std::shared_ptr<variable_scope>& sc,
+		bool split_and_substitute(const std::string& key, current_section_info* c, const str_view& value, const std::shared_ptr<variable_scope>& sc,
 			std::vector<std::string>* referenced_variables, variant& result) const
 		{
 			const auto split = split_string_quotes(value, !key.empty() && key[0] == '@');
@@ -1650,28 +1907,27 @@ namespace utils
 						scope_own = scope->inherit();
 					}
 
-					auto set_key = item.substr(0, set);
-					auto set_value = item.substr(set + 1);
-					trim_self(set_key);
-					trim_self(set_value);
+					auto set_key = str_view{item, 0, uint32_t(set)};
+					auto set_value = str_view{item, uint32_t(set + 1)};
+					set_key.trim();
+					set_value.trim();
 
-					if (set_key.find(SPECIAL_CALCULATE) == 0
-						&& set_value.size() > SPECIAL_END.size()
-						&& set_value.substr(set_value.size() - SPECIAL_END.size()) == SPECIAL_END)
+					if (set_key.starts_with(SPECIAL_CALCULATE_STR)
+						&& set_value.ends_with(SPECIAL_END_STR))
 					{
-						set_key = set_key.substr(SPECIAL_CALCULATE.size());
+						set_key = set_key.substr(uint32_t(SPECIAL_CALCULATE.size()));
 						variant v;
-						if (substitute_variable_array(set_key, variant((SPECIAL_CALCULATE + set_value).c_str()), scope_own, &referenced_variables, v))
+						if (substitute_variable_array(set_key.str(), variant(SPECIAL_CALCULATE + set_value.str()), scope_own, &referenced_variables, v))
 						{
-							scope_own->explicit_values.set(set_key, v);
+							scope_own->explicit_values.set(set_key.str(), std::move(v));
 						}
 					}
 					else
 					{
 						variant v;
-						if (split_and_substitute(set_key, nullptr, set_value, scope_own, &referenced_variables, v))
+						if (split_and_substitute(set_key.str(), nullptr, set_value, scope_own, &referenced_variables, v))
 						{
-							scope_own->explicit_values.set(set_key, v);
+							scope_own->explicit_values.set(set_key.str(), std::move(v));
 						}
 					}
 				}
@@ -1752,14 +2008,14 @@ namespace utils
 
 			for (const auto& v : t->values)
 			{
-				if (v.first.find("@ACTIVE") == 0) continue;
+				if (starts_with(v.first, "@ACTIVE")) continue;
 
-				const auto is_output = v.first == "@OUTPUT";
+				const auto is_output = equals(v.first, "@OUTPUT");
 				if (is_output && !c.section_key.empty()) continue;
 
-				const auto is_generator = v.first.find("@GENERATOR") == 0;
+				const auto is_generator = starts_with(v.first, "@GENERATOR");
 				const auto is_generator_param = is_generator && v.first.find_first_of(':') != std::string::npos;
-				const auto is_mixin = v.first.find("@MIXIN") == 0 || v.first == "@";
+				const auto is_mixin = starts_with(v.first, "@MIXIN") || equals(v.first, "@");
 				const auto is_virtual = is_output || is_generator || is_mixin;
 
 				auto& set_via_template = c.set_via_template[t.get()];
@@ -1864,7 +2120,7 @@ namespace utils
 				}
 			}
 
-			if (c.section_key == "FUNCTION")
+			if (equals(c.section_key, "FUNCTION") && current_params.allow_lua)
 			{
 				lua_register_function(
 					c.target_section.get("NAME").as<std::string>(),
@@ -1874,7 +2130,7 @@ namespace utils
 					current_params.file, current_params.error_handler);
 				c.target_section.clear();
 			}
-			else if (c.section_key == "USE")
+			else if (equals(c.section_key, "USE") && current_params.allow_lua)
 			{
 				const auto name = c.target_section.get("FILE").as<std::string>();
 				const auto referenced = find_referenced(name, 0);
@@ -1882,7 +2138,7 @@ namespace utils
 				else error("Referenced file is missing: %s", name);
 				c.target_section.clear();
 			}
-			else if (c.section_key.find("INCLUDE") == 0)
+			else if (starts_with(c.section_key, "INCLUDE"))
 			{
 				const auto to_include = c.target_section.find("INCLUDE");
 				if (to_include != c.target_section.end())
@@ -1892,8 +2148,8 @@ namespace utils
 
 					for (const auto& p : c.target_section.values)
 					{
-						if (p.first == "INCLUDE") continue;
-						if (p.first.find("VAR") == 0) include_scope->include_params.set(p.second.as<std::string>(), p.second.as<variant>(1));
+						if (equals(p.first, "INCLUDE")) continue;
+						if (starts_with(p.first, "VAR")) include_scope->include_params.set(p.second.as<std::string>(), p.second.as<variant>(1));
 						else include_scope->include_params.set(p.first, p.second);
 					}
 
@@ -1926,21 +2182,21 @@ namespace utils
 			}
 		}
 
-		static variant split_string_quotes(const std::string& str, bool consider_inline_params)
+		static variant split_string_quotes(const str_view& str, bool consider_inline_params)
 		{
 			variant result;
 
-			if (is_solid(str, 0))
+			if (is_solid(str))
 			{
-				result.data().push_back(str);
+				result.data().push_back(str.str());
 				return result;
 			}
-
+			
 			auto last_nonspace = 0;
 			auto q = -1;
 			auto u = false, w = false;
 			std::string item;
-			for (auto i = 0, t = int(str.size()); i < t; i++)
+			for (auto i = 0U, t = str.size(); i < t; i++)
 			{
 				const auto c = str[i];
 
@@ -2005,8 +2261,8 @@ namespace utils
 				}
 				else if (q == -1 && c == ',')
 				{
-					result.data().push_back(item);
-					item.clear();
+					result.data().emplace_back();
+					result.data().rbegin()->swap(item);
 					last_nonspace = i + 1;
 				}
 				else if (!is_whitespace(c) && (c != '$' || str[i + 1] != '"' && str[i + 1] != '\''))
@@ -2019,7 +2275,7 @@ namespace utils
 					else item += str.substr(last_nonspace, i + 1 - last_nonspace);
 					last_nonspace = i + 1;
 				}
-				else if (i == last_nonspace && item.empty())
+				else if (i == uint32_t(last_nonspace) && item.empty())
 				{
 					last_nonspace++;
 				}
@@ -2035,23 +2291,24 @@ namespace utils
 				? group_us + SPECIAL_KEY_AUTOINCREMENT + std::to_string(key_autoinc_index++) : key;
 		}
 
-		void parse_ini_finish(current_section_info& c, const std::string& data, const int non_space, std::string& key,
+		void parse_ini_finish(current_section_info& c, const std::string& data, const int non_space, str_view& key_view,
 			const int started, const std::shared_ptr<variable_scope>& scope)
 		{
 			if (!c.section_mode() && !c.target_template) return;
-			if (key.empty()) return;
+			if (key_view.empty()) return;
 
-			std::string value;
+			str_view value;
 			if (started != -1)
 			{
 				const auto length = 1 + non_space - started;
-				value = length < 0 ? "" : data.substr(started, length);
+				value = {data, uint32_t(started), length < 0 ? 0 : uint32_t(length)};
 			}
 			else
 			{
-				value.clear();
+				value = {};
 			}
 
+			auto key = key_view.str();
 			const auto sc = prepare_section_scope(c, scope);
 			const auto new_key = current_params.allow_override || !c.referenced_templates.empty() || (c.section_mode()
 				? c.target_section.find(key) == c.target_section.end()
@@ -2062,10 +2319,11 @@ namespace utils
 				return;
 			}
 
-			if (key.find("${") != std::string::npos || key.find("$\"") != std::string::npos)
+			const auto key_i = key.find_first_of('$');
+			if (key_i != std::string::npos && (key[key_i + 1] == '{' || key[key_i + 1] == '\"'))
 			{
 				variant v;
-				if (!split_and_substitute(key, &c, key, sc, &c.referenced_variables, v))
+				if (!split_and_substitute(key, &c, str_view{key}, sc, &c.referenced_variables, v))
 				{
 					return;
 				}
@@ -2074,25 +2332,25 @@ namespace utils
 
 			if (c.section_mode())
 			{
-				if (key.find("@MIXIN") == 0 || key == "@")
+				if (starts_with(key, "@MIXIN") || equals(key, "@"))
 				{
 					resolve_mixin(c, sc, splitted);
 				}
-				else if (key.find("@GENERATOR") == 0)
+				else if (starts_with(key, "@GENERATOR"))
 				{
 					resolve_generator(nullptr, "", splitted, sc, c.referenced_variables);
 				}
-				else if (key == "@ERASE_REFERENCED" && c.section_key == "@INIPP")
+				else if (equals(key, "@ERASE_REFERENCED") && equals(c.section_key, "@INIPP"))
 				{
 					current_params.erase_referenced = variant(splitted).as<bool>();
 				}
-				else if (c.section_key == "DEFAULTS")
+				else if (equals(c.section_key, "DEFAULTS"))
 				{
-					const auto compatible_mode = key.find("VAR") == 0 && !splitted.empty();
+					const auto compatible_mode = starts_with(key, "VAR") && !splitted.empty();
 					const auto& actual_key = compatible_mode ? splitted.data()[0] : key;
 					scope->default_values.set(actual_key, compatible_mode ? variant(splitted).as<variant>(1) : splitted);
 				}
-				else if (c.section_key == "INCLUDE" && key == "INCLUDE")
+				else if (equals(c.section_key, "INCLUDE") && equals(key, "INCLUDE"))
 				{
 					auto& existing = c.target_section.get(key);
 					for (const auto& piece : splitted)
@@ -2114,9 +2372,7 @@ namespace utils
 
 		static bool is_sequential(const std::string& s, std::string& group_with_underscore)
 		{
-			if (s.size() <= 4) return false;
-			const auto postfix = s.substr(s.size() - 4);
-			if (postfix == "_..." || postfix == u8"_…" /* how lucky they are the same size lol */)
+			if (ends_with(s, "_...") || ends_with(s, u8"_…") /* how lucky they are the same size lol */)
 			{
 				group_with_underscore = s.substr(0, s.size() - 3);
 				return true;
@@ -2126,7 +2382,7 @@ namespace utils
 
 		struct parse_status
 		{
-			std::string key;
+			str_view key;
 			int started = -1;
 			int end_at = -1;
 			bool started_solid{};
@@ -2163,21 +2419,21 @@ namespace utils
 			return sections[sections.size() - 1].second;
 		}
 
-		void set_sections(std::vector<std::unique_ptr<current_section_info>>& cs, std::string& cs_keys, const std::shared_ptr<variable_scope>& scope)
+		void set_sections(std::vector<std::unique_ptr<current_section_info>>& cs, str_view cs_keys, const std::shared_ptr<variable_scope>& scope)
 		{
-			std::string final_name;
+			str_view final_name;
 			auto separator = cs_keys.find_first_of(':');
 			auto is_template = false;
 			auto is_mixin = false;
 			if (separator != std::string::npos)
 			{
 				final_name = cs_keys.substr(0, separator);
-				trim_self(final_name);
+				final_name.trim();
 
 				if (final_name == "INCLUDE")
 				{
 					auto file = cs_keys.substr(separator + 1);
-					trim_self(file);
+					file.trim();
 					cs.push_back(std::make_unique<current_section_info>(final_name));
 					for (const auto& s : cs) s->target_section.set("INCLUDE", file);
 					return;
@@ -2186,7 +2442,7 @@ namespace utils
 				if (final_name == "FUNCTION")
 				{
 					auto file = cs_keys.substr(separator + 1);
-					trim_self(file);
+					file.trim();
 					cs.push_back(std::make_unique<current_section_info>(final_name));
 					for (const auto& s : cs) s->target_section.set("NAME", file);
 					return;
@@ -2195,7 +2451,7 @@ namespace utils
 				if (final_name == "USE")
 				{
 					auto file = cs_keys.substr(separator + 1);
-					trim_self(file);
+					file.trim();
 					cs.push_back(std::make_unique<current_section_info>(final_name));
 					for (const auto& s : cs) s->target_section.set("FILE", file);
 					return;
@@ -2206,21 +2462,21 @@ namespace utils
 				cs_keys = cs_keys.substr(separator + 1);
 			}
 
-			auto section_names = split_string(cs_keys, ",", true, true);
+			auto section_names = cs_keys.split(',', true, true);
 			if (section_names.empty()) section_names.emplace_back("");
 
 			if (is_template)
 			{
 				for (const auto& cs_key : section_names)
 				{
-					auto pieces = split_string(cs_key, " ", true, true);
+					auto pieces = split_string(cs_key.str(), " ", true, true);
 					auto template_name = pieces[0];
 					if (templates_map.find(template_name) == templates_map.end())
 					{
 						templates_map[template_name] = std::make_unique<section_template>(template_name, scope);
 					}
 
-					if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
+					if (pieces.size() > 2 && (equals(pieces[1], "extends") || equals(pieces[1], "EXTENDS")))
 					{
 						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
 						{
@@ -2246,7 +2502,7 @@ namespace utils
 			{
 				for (const auto& cs_key : section_names)
 				{
-					auto pieces = split_string(cs_key, " ", true, true);
+					auto pieces = split_string(cs_key.str(), " ", true, true);
 
 					auto template_name = pieces[0];
 					if (mixins_map.find(template_name) == mixins_map.end())
@@ -2254,7 +2510,7 @@ namespace utils
 						mixins_map[template_name] = std::make_unique<section_template>(template_name, scope);
 					}
 
-					if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
+					if (pieces.size() > 2 && (equals(pieces[1], "extends") || equals(pieces[1], "EXTENDS")))
 					{
 						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
 						{
@@ -2282,7 +2538,7 @@ namespace utils
 			std::reverse(section_names_inv.begin(), section_names_inv.end());
 			for (const auto& section_name : section_names_inv)
 			{
-				auto found_template = templates_map.find(section_name);
+				auto found_template = templates_map.find(section_name.str()); // TODO
 				if (found_template != templates_map.end())
 				{
 					add_template(referenced_templates, found_template->second);
@@ -2313,7 +2569,7 @@ namespace utils
 			return true;
 		}
 
-		void parse_ini_values(const char* data, const int data_size, const std::shared_ptr<variable_scope>& parent_scope)
+		void parse_ini_values(const std::string& data, const std::shared_ptr<variable_scope>& parent_scope)
 		{
 			std::vector<std::unique_ptr<current_section_info>> cs;
 			const auto scope = parent_scope ? parent_scope->inherit() : std::make_shared<variable_scope>();
@@ -2322,6 +2578,7 @@ namespace utils
 			auto non_space = -1;
 			auto consume_comment = false;
 
+			const auto data_size = int(data.size());
 			for (auto i = 0; i < data_size; i++)
 			{
 				const auto c = data[i];
@@ -2348,15 +2605,14 @@ namespace utils
 					const auto s = ++i;
 					if (s == data_size) continue;
 					for (; i < data_size && data[i] != ']'; i++) {}
-					auto cs_keys = std::string(&data[s], i - s);
 					cs.clear();
-					set_sections(cs, cs_keys, scope);
+					set_sections(cs, str_view{data, uint32_t(s), uint32_t(i - s)}, scope);
 				}
 				else if (c == '=')
 				{
 					if (status.started != -1 && status.key.empty() && !cs.empty())
 					{
-						status.key = std::string(&data[status.started], 1 + non_space - status.started);
+						status.key = str_view(data, uint32_t(status.started), 1 + non_space > status.started ? 1 + non_space - status.started : 0);
 						status.started = -1;
 						status.started_solid = false;
 						status.end_at = -1;
@@ -2370,7 +2626,7 @@ namespace utils
 						{
 							status.end_at = -1;
 						}
-						else if (status.end_at == -1 && (status.started == -1 || is_quote_working(data, status.started, i)))
+						else if (status.end_at == -1 && (status.started == -1 || is_quote_working(data.c_str(), status.started, i)))
 						{
 							status.end_at = c;
 							if (status.started == -1)
@@ -2384,7 +2640,7 @@ namespace utils
 					if (status.started == -1)
 					{
 						status.started = i;
-						status.started_solid = c == 'd' && is_solid(data, i);
+						status.started_solid = c == 'd' && is_solid({data, uint32_t(i)});
 					}
 				}
 			}
@@ -2402,7 +2658,7 @@ namespace utils
 			{
 				warn("File is missing or empty: %s", path.string());
 			}
-			parse_ini_values(data.c_str(), int(data.size()), scope);
+			parse_ini_values(data, scope);
 		}
 
 		static resulting_section resolve_sequential_keys(creating_section& s)
@@ -2489,7 +2745,7 @@ namespace utils
 	const ini_parser& ini_parser::parse(const char* data, const int data_size, ini_parser_error_handler& error_handler) const
 	{
 		data_->current_params.error_handler = &error_handler;
-		data_->parse_ini_values(data, data_size, {nullptr});
+		data_->parse_ini_values(std::string(data, data_size), {nullptr});
 		data_->current_params.error_handler = {};
 		return *this;
 	}
@@ -2497,7 +2753,7 @@ namespace utils
 	const ini_parser& ini_parser::parse(const std::string& data, ini_parser_error_handler& error_handler) const
 	{
 		data_->current_params.error_handler = &error_handler;
-		data_->parse_ini_values(data.c_str(), int(data.size()), {nullptr});
+		data_->parse_ini_values(data, {nullptr});
 		data_->reader = {};
 		data_->current_params.error_handler = {};
 		return *this;
@@ -2508,7 +2764,7 @@ namespace utils
 	{
 		data_->reader = &reader;
 		data_->current_params.error_handler = &error_handler;
-		data_->parse_ini_values(data, data_size, {nullptr});
+		data_->parse_ini_values(std::string(data, data_size), {nullptr});
 		data_->reader = {};
 		data_->current_params.error_handler = {};
 		return *this;
@@ -2518,7 +2774,7 @@ namespace utils
 	{
 		data_->reader = &reader;
 		data_->current_params.error_handler = &error_handler;
-		data_->parse_ini_values(data.c_str(), int(data.size()), {nullptr});
+		data_->parse_ini_values(data, {nullptr});
 		data_->reader = {};
 		data_->current_params.error_handler = {};
 		return *this;
@@ -2544,7 +2800,7 @@ namespace utils
 	void ini_parser::finalize_end() const
 	{
 		data_->resolve_sequential();
-		if (lua_state.ptr && (!lua_state.is_clean || lua_state.used > 40))
+		if (data_->current_params.allow_lua && lua_state.ptr && (!lua_state.is_clean || lua_state.used > 40))
 		{
 			lua_close(lua_state.ptr);
 			lua_state.ptr = nullptr;

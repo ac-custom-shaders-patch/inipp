@@ -249,7 +249,10 @@
     <ClInclude Include="utility\ini_parser.h" />
     <ClInclude Include="utility\ini_parser_lua_lib.h" />
     <ClInclude Include="utility\json.h" />
+    <ClInclude Include="utility\string_operations.h" />
     <ClInclude Include="utility\variant.h" />
+    <ClInclude Include="utility\xxhash\xxh3.h" />
+    <ClInclude Include="utility\xxhash\xxhash.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="inipp.cpp" />
@@ -265,7 +268,16 @@
     <ClCompile Include="utility\filesystem.cpp" />
     <ClCompile Include="utility\ini_parser.cpp" />
     <ClCompile Include="utility\string_codecvt.cpp" />
+    <ClCompile Include="utility\string_operations.cpp" />
     <ClCompile Include="utility\variant.cpp" />
+    <ClCompile Include="utility\xxhash\xxhash.c">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (run dev.ini only)|Win32'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (run dev.ini only)|x64'">NotUsing</PrecompiledHeader>
+    </ClCompile>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

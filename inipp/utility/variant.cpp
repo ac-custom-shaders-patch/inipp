@@ -1,33 +1,16 @@
 ﻿#include "stdafx.h"
 #include "variant.h"
+#include <utility/string_parse.h>
 
 namespace utils
 {
+	static std::string _default_string{};
+
 	variant::variant(const char* value): values_(1, value) { }
 	variant::variant(const wchar_t* value): values_(1, utf16_to_utf8(value)) { }
 	variant::variant(const std::vector<std::string>&& values): values_(values) { }
 	std::vector<std::string>& variant::data() { return values_; }
 	const std::vector<std::string>& variant::data() const { return values_; }
-
-	static bool isdigit(const char c)
-	{
-		return c >= '0' && c <= '9' || c == '-' || c == '.';
-	}
-
-	static float safe_strtof(const char* c)
-	{
-		if (!isdigit(c[0])) return 0.f;
-		return std::strtof(c, nullptr);
-	}
-
-	static uint32_t safe_strtou(const char* c)
-	{
-		if (!isdigit(c[0])) return 0;
-		if (strlen(c) > 2 && c[0] == '0' && c[1] == 'x') {
-			return uint32_t(std::strtoull(c + 2, nullptr, 16));
-		}
-		return uint32_t(std::strtoul(c, nullptr, 10));
-	}
 
 	variant::variant(const std::vector<std::wstring>&& values)
 	{
@@ -37,115 +20,36 @@ namespace utils
 		}
 	}
 
-	bool variant::as_bool(size_t i) const
-	{
-		return as<int>(i) != 0 || i < values_.size() && (values_[i] == "true" || values_[i] == "True" || values_[i] == "TRUE");
-	}
-
-	uint64_t variant::as_uint64_t(size_t i) const
-	{
-		if (i >= values_.size())
-		{
-			return 0UL;
-		}
-
-		auto s = values_[i];
-		if (s.size() > 2 && s[0] == '0' && s[1] == 'x') return std::strtoull(s.c_str() + 2, nullptr, 16);
-		if (s.empty() || !isdigit(s[0])) return 0UL;
-		return std::stoull(values_[i], nullptr, 10);
-	}
-
-	int64_t variant::as_int64_t(size_t i) const
-	{
-		if (i >= values_.size())
-		{
-			return 0L;
-		}
-
-		auto s = values_[i];
-		if (s.size() > 2 && s[0] == '0' && s[1] == 'x') return std::strtoull(s.c_str() + 2, nullptr, 16);
-		if (s.empty() || !isdigit(s[0])) return 0L;
-		return std::stoll(s, nullptr, 10);
-	}
-
-	double variant::as_double(size_t i) const
-	{
-		if (i >= values_.size()) return 0.0;
-		auto s = values_[i];
-		if (s.empty() || !isdigit(s[0])) return 0.0;
-		return std::strtod(s.c_str(), nullptr);
-	}
-
-	static std::string _default_string{};
-
-	const std::string& variant::as_string(size_t i) const
-	{
-		if (i >= values_.size()) return _default_string;
-		return values_[i];
-	}
-
-	std::wstring variant::as_wstring(size_t i) const
-	{
-		if (i >= values_.size()) return std::wstring();
-		return utf8_to_utf16(values_[i]);
-	}
+	bool variant::as_bool(size_t i) const { return i < values_.size() && parse(values_[i], false); }
+	uint64_t variant::as_uint64_t(size_t i) const { return i < values_.size() ? parse(values_[i], 0ULL) : 0; }
+	int64_t variant::as_int64_t(size_t i) const { return i < values_.size() ? parse(values_[i], 0LL) : 0; }
+	double variant::as_double(size_t i) const { return i < values_.size() ? parse(values_[i], 0.) : 0; }
+	float variant::as_float(size_t i) const { return i < values_.size() ? parse(values_[i], 0.f) : 0; }
+	const std::string& variant::as_string(size_t i) const { return i < values_.size() ? values_[i] : _default_string; }
+	std::wstring variant::as_wstring(size_t i) const { return i < values_.size() ? utf8_to_utf16(values_[i]) : std::wstring(); }
 
 	#ifndef USE_SIMPLE
-	math::uint2 variant::as_uint2(size_t i) const
+
+	template <typename Vector>
+	Vector as_vector(const std::vector<std::string>& v, size_t i)
 	{
-		math::uint2 result;
-		for (auto k = 0; k < 2; k++)
+		Vector result;
+		for (size_t k = 0U; k < sizeof(Vector) / sizeof(result.x); ++k)
 		{
-			result[k] = i + k >= values_.size() ? 0U : safe_strtou(values_[i + k].c_str());
-		}
-		if (values_.size() - i == 1)
-		{
-			result.y = result.x;
+			result[k] = i + k < v.size() ? parse(v[i + k], result[k]) : v.size() - i == 1 ? result[0] : 0;
 		}
 		return result;
 	}
 
-	math::float2 variant::as_float2(size_t i) const
-	{
-		math::float2 result;
-		for (auto k = 0; k < 2; k++)
-		{
-			result[k] = i + k >= values_.size() ? 0.0f : safe_strtof(values_[i + k].c_str());
-		}
-		if (values_.size() - i == 1)
-		{
-			result.y = result.x;
-		}
-		return result;
-	}
-
-	math::float3 variant::as_float3(size_t i) const
-	{
-		math::float3 result;
-		for (auto k = 0; k < 3; k++)
-		{
-			result[k] = i + k >= values_.size() ? 0.0f : safe_strtof(values_[i + k].c_str());
-		}
-		if (values_.size() - i == 1)
-		{
-			result.y = result.z = result.x;
-		}
-		return result;
-	}
-
-	math::float4 variant::as_float4(size_t i) const
-	{
-		math::float4 result;
-		for (auto k = 0; k < 4; k++)
-		{
-			result[k] = i + k >= values_.size() ? 0.0f : safe_strtof(values_[i + k].c_str());
-		}
-		if (values_.size() - i == 1)
-		{
-			result.y = result.z = result.w = result.x;
-		}
-		return result;
-	}
+	math::int2 variant::as_int2(size_t i) const { return as_vector<math::int2>(values_, i); }
+	math::int3 variant::as_int3(size_t i) const{ return as_vector<math::int3>(values_, i); }
+	math::int4 variant::as_int4(size_t i) const{ return as_vector<math::int4>(values_, i); }
+	math::uint2 variant::as_uint2(size_t i) const{ return as_vector<math::uint2>(values_, i); }
+	math::uint3 variant::as_uint3(size_t i) const{ return as_vector<math::uint3>(values_, i); }
+	math::uint4 variant::as_uint4(size_t i) const{ return as_vector<math::uint4>(values_, i); }
+	math::float2 variant::as_float2(size_t i) const{ return as_vector<math::float2>(values_, i); }	
+	math::float3 variant::as_float3(size_t i) const{ return as_vector<math::float3>(values_, i); }
+	math::float4 variant::as_float4(size_t i) const{ return as_vector<math::float4>(values_, i); }
 
 	math::rgbm variant::as_rgbm(size_t i) const
 	{
@@ -165,23 +69,23 @@ namespace utils
 				result.rgb.g = float(g) / 15.f;
 				result.rgb.b = float(b) / 15.f;
 			}
-			result.mult = values_.size() == 2 ? safe_strtof(values_[1].c_str()) : 1.f;
+			result.mult = values_.size() == 2 ? parse(values_[1], 0.f) : 1.f;
 			return result;
 		}
 		for (auto k = 0; k < 4; k++)
 		{
-			result[k] = i + k >= values_.size() ? 0.0f : safe_strtof(values_[i + k].c_str());
+			result[k] = i + k >= values_.size() ? 0.f : parse(values_[i + k], 0.f);
 		}
 		if (values_.size() == 1)
 		{
 			result.rgb.g = result.rgb.b = result.rgb.r;
-			result.mult = 1.0f;
+			result.mult = 1.f;
 		}
 		else if (values_.size() == 3)
 		{
-			result.mult = 1.0f;
+			result.mult = 1.f;
 		}
 		return result;
 	}
-#endif
+	#endif
 }

@@ -8,9 +8,11 @@
 #include <string>
 #include <vector>
 #include <ostream>
+#include <functional>
 #include "string_codecvt.h"
 
 #ifndef USE_SIMPLE
+#include "blob.h"
 #include "special_folder.h"
 #endif
 
@@ -62,25 +64,11 @@ namespace utils
 		path filename() const;
 		path filename_without_extension() const;
 		std::string extension() const;
-
-		path& remove_filename()
-		{
-			return operator=(parent_path());
-		}
-
-		path& replace_extension(const std::string& extension);
-
+		bool extension_matches(const std::vector<std::string>& extensions) const;
+		path replace_extension(const std::string& extension) const;
 		path operator/(const path& more) const;
-
-		path operator+(char c) const
-		{
-			return data_ + c;
-		}
-
-		path operator+(const path& more) const
-		{
-			return data_ + more.data_;
-		}
+		path operator+(char c) const { return data_ + c; }
+		path operator+(const path& more) const { return data_ + more.data_; }
 
 	private:
 		std::string data_;
@@ -88,7 +76,6 @@ namespace utils
 
 	bool exists(const path& path);
 	bool create_dir(const path& path);
-	std::string read(const path& path);
 	long long get_file_size(const path& path);
 	path resolve(const path& filename, const std::vector<path>& paths);
 	path absolute(const path& filename, const path& parent_path);
@@ -98,8 +85,18 @@ namespace utils
 	void set_special_folders_path(const path& ac_root);
 	path get_special_folder_path(special_folder id);
 
-	std::vector<path> list_files(const path& path_val, const std::string& mask = "*", bool recursive = false);
-	bool try_find_file(const path& path_val, const std::string& file_name, path& result);
+	#ifndef USE_SIMPLE
+	path scan_dir(const path& dir, const char* mask,
+		const std::function<bool(const WIN32_FIND_DATAW& data)>& callback);
+	path scan_dir_recursive(const path& dir, const char* mask,
+		const std::function<bool(const WIN32_FIND_DATAW& data, const path& parent)>& callback,
+		const std::function<bool(const WIN32_FIND_DATAW& data, const path& parent)>& filter_dir = {});
+	std::vector<path> list_files(const path& path_val, const char* mask = "*", bool recursive = false);
 
-	std::vector<byte> read_file(const path& filename);
+	bool try_read_file(const path& filename, blob& result);
+	void write_file(const path& filename, const blob& data);
+
+	blob read_file(const path& filename);
+	#endif
+	std::string read_file_str(const path& filename);
 }

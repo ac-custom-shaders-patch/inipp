@@ -23,7 +23,19 @@ namespace utils
 {
 	bool path::operator==(const path& other) const
 	{
-		return _stricmp(data_.c_str(), other.data_.c_str()) == 0;
+		const auto& d0 = data_;
+		const auto& d1 = other.data_;
+		const auto s0 = d0.size();
+		if (s0 != d1.size()) return false;
+		for (auto i = 0U; i < s0; ++i)
+		{
+			auto c0 = tolower(d0[i]);
+			auto c1 = tolower(d1[i]);
+			if (c0 == '/') c0 = '\\';
+			if (c1 == '/') c1 = '\\';
+			if (c0 != c1) return false;
+		}
+		return true;
 	}
 
 	bool path::operator!=(const path& other) const
@@ -49,21 +61,13 @@ namespace utils
 
 	path path::parent_path() const
 	{
-		const auto e0 = data_.find_last_of('/');
-		const auto e1 = data_.find_last_of('\\');
-		const auto e = e1 == std::string::npos ? e0
-			: e0 == std::string::npos ? e1
-			: std::max(e0, e1);
+		const auto e = data_.find_last_of("/\\");
 		return e == std::string::npos ? path() : data_.substr(0, e);
 	}
 
 	path path::filename() const
 	{
-		const auto e0 = data_.find_last_of('/');
-		const auto e1 = data_.find_last_of('\\');
-		const auto e = e1 == std::string::npos ? e0
-			: e0 == std::string::npos ? e1
-			: std::max(e0, e1);
+		const auto e = data_.find_last_of("/\\");
 		return e == std::string::npos ? data_ : data_.substr(e + 1);
 
 		// WCHAR buffer[MAX_PATH] = {};
@@ -87,28 +91,38 @@ namespace utils
 
 	path path::filename_without_extension() const
 	{
-		WCHAR buffer[MAX_PATH] = {};
-		_utf8_to_utf16(data_, buffer);
-
-		PathRemoveExtensionW(buffer);
-		return utf16_to_utf8(PathFindFileNameW(buffer));
+		const auto e = data_.find_last_of("/\\");
+		const auto o = e == std::string::npos ? 0 : e + 1;
+		auto s = data_.find_last_of('.');
+		if (s <= o) s = std::string::npos;
+		return s == std::string::npos ? data_.substr(o) : data_.substr(o, s - o);
 	}
 
 	std::string path::extension() const
 	{
-		WCHAR buffer[MAX_PATH] = {};
-		_utf8_to_utf16(data_, buffer);
-
-		return utf16_to_utf8(PathFindExtensionW(buffer));
+		const auto e = data_.find_last_of("/\\");
+		const auto o = e == std::string::npos ? 0 : e + 1;
+		auto s = data_.find_last_of('.');
+		if (s <= o) s = std::string::npos;
+		return s == std::string::npos ? std::string() : data_.substr(s);
 	}
 
-	path& path::replace_extension(const std::string& extension)
+	bool path::extension_matches(const std::vector<std::string>& extensions) const
 	{
-		WCHAR buffer[MAX_PATH] = {};
-		_utf8_to_utf16(data_, buffer);
+		auto ex = extension();
+		std::transform(ex.begin(), ex.end(), ex.begin(), tolower);
+		for (const auto& e : extensions)
+		{
+			if (ex == e) return true;
+		}
+		return false;
+	}
 
-		PathRenameExtensionW(buffer, utf8_to_utf16(extension).c_str());
-		return operator=(utf16_to_utf8(buffer));
+	path path::replace_extension(const std::string& extension) const
+	{
+		const auto e = data_.find_last_of("/\\");
+		const auto s = data_.find_last_of('.');
+		return (s != std::string::npos && (e == std::string::npos || e < s) ? data_.substr(0, s) : data_) + extension;
 	}
 
 	path path::operator/(const path& more) const
@@ -133,14 +147,6 @@ namespace utils
 		}
 
 		return CreateDirectoryW(path.wstring().c_str(), nullptr) != 0;
-	}
-
-	std::string read(const path& path)
-	{
-		const std::ifstream file(path.wstring(), std::ios::binary);
-		std::stringstream buffer;
-		buffer << file.rdbuf();
-		return buffer.str();
 	}
 
 	long long get_file_size(const path& path)
@@ -199,6 +205,9 @@ namespace utils
 		SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, result);
 		paths[special_folder::app_data] = path(result);
 
+		SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, result);
+		paths[special_folder::app_data_local] = path(result);
+
 		GetSystemDirectoryW(result, MAX_PATH);
 		paths[special_folder::system] = path(result);
 
@@ -226,14 +235,11 @@ namespace utils
 		paths[special_folder::ac_ext] = ac_root / "extension";
 		paths[special_folder::ac_ext_cfg_sys] = ac_root / "extension" / "config";
 		paths[special_folder::ac_ext_cfg_user] = paths[special_folder::ac_cfg] / "extension";
-		
+
 		paths[special_folder::ac_ext_textures] = paths[special_folder::ac_ext] / "textures";
+		paths[special_folder::ac_ext_fonts] = paths[special_folder::ac_ext] / "fonts";
 		paths[special_folder::ac_ext_app_icons] = paths[special_folder::ac_ext_textures] / "app_icons";
-		#ifdef DEVELOPMENT_CFG
 		paths[special_folder::ac_ext_shaders] = paths[special_folder::ac_ext] / "shaders";
-		#else
-		paths[special_folder::ac_ext_shaders] = paths[special_folder::ac_ext] / "shaders_dev";
-		#endif
 		paths[special_folder::ac_ext_shaders_pack] = paths[special_folder::ac_ext] / "shaders.zip";
 		paths[special_folder::ac_apps] = ac_root / "apps";
 		paths[special_folder::ac_apps_python] = paths[special_folder::ac_apps] / "python";
@@ -247,86 +253,110 @@ namespace utils
 		const auto found = paths.find(id);
 		return found != paths.end() ? found->second : default_path;
 	}
+
+	std::vector<path> list_files(const path& path_val, const char* mask, const bool recursive)
+	{
+		std::vector<path> ret;
+		if (recursive)
+		{
+			scan_dir_recursive(path_val, mask, [&](const WIN32_FIND_DATAW& data, const path& parent)
+			{
+				ret.push_back(parent / data.cFileName);
+				return false;
+			});
+		}
+		else
+		{
+			scan_dir(path_val, mask, [&](const WIN32_FIND_DATAW& data)
+			{
+				ret.push_back(path_val / data.cFileName);
+				return false;
+			});
+		}
+		return ret;
+	}
 	#endif
 
-	std::vector<path> list_files(const path& path_val, const std::string& mask, const bool recursive)
+	path scan_dir(const path& dir, const char* mask, const std::function<bool(const WIN32_FIND_DATAW& data)>& callback)
 	{
-		if (!PathIsDirectoryW(path_val.wstring().c_str()))
+		path ret;
+		const auto attributes = GetFileAttributesW(dir.wstring().c_str());
+		if (attributes == INVALID_FILE_ATTRIBUTES) return {};
+		if (attributes & FILE_ATTRIBUTE_DIRECTORY)
 		{
-			return {};
-		}
-
-		WIN32_FIND_DATAW ffd;
-		const auto handle = FindFirstFileW((path_val / mask).wstring().c_str(), &ffd);
-		if (handle == INVALID_HANDLE_VALUE)
-		{
-			return {};
-		}
-
-		std::vector<path> result;
-
-		do
-		{
-			const auto filename = utf16_to_utf8(ffd.cFileName);
-			if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			WIN32_FIND_DATAW ffd;
+			const auto handle = FindFirstFileW((dir / mask).wstring().c_str(), &ffd);
+			if (handle == INVALID_HANDLE_VALUE) return {};
+			do
 			{
-				if (recursive)
+				const auto is_dir = ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+				if (!is_dir)
 				{
-					const auto recursive_result = list_files(filename, mask, true);
-					result.insert(result.end(), recursive_result.begin(), recursive_result.end());
+					if (callback(ffd))
+					{
+						ret = dir / ffd.cFileName;
+						break;
+					}
 				}
 			}
-			else
-			{
-				result.push_back(path_val / filename);
-			}
+			while (FindNextFileW(handle, &ffd));
+			FindClose(handle);
 		}
-		while (FindNextFileW(handle, &ffd));
-		FindClose(handle);
-		return result;
+		return ret;
 	}
 
-	bool try_find_file(const path& path_val, const std::string& file_name, path& result)
+	path scan_dir_recursive(const path& dir, const char* mask,
+		const std::function<bool(const WIN32_FIND_DATAW& data, const path& parent)>& callback,
+		const std::function<bool(const WIN32_FIND_DATAW& data, const path& parent)>& filter_dir)
 	{
-		if (!PathIsDirectoryW(path_val.wstring().c_str())) return false;
-
-		WIN32_FIND_DATAW ffd;
-		const auto handle = FindFirstFileW((path_val / "*").wstring().c_str(), &ffd);
-		if (handle == INVALID_HANDLE_VALUE) return false;
-
-		do
+		std::list<path> queue = {dir};
+		path ret;
+		while (!queue.empty())
 		{
-			if (ffd.cFileName[0] == '.') continue;
-
-			const auto filename = utf16_to_utf8(ffd.cFileName);
-			if (ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+			auto item = queue.front();
+			queue.pop_front();
+			const auto insert_index = queue.begin();
+			const auto attributes = GetFileAttributesW(item.wstring().c_str());
+			if (attributes == INVALID_FILE_ATTRIBUTES) continue;
+			if (attributes & FILE_ATTRIBUTE_DIRECTORY)
 			{
-				if (try_find_file(path_val / filename, file_name, result))
+				WIN32_FIND_DATAW ffd;
+				const auto handle = FindFirstFileW((item / mask).wstring().c_str(), &ffd);
+				if (handle == INVALID_HANDLE_VALUE) continue;
+				do
 				{
-					FindClose(handle);
-					return true;
+					const auto is_dir = ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY;
+					if (is_dir)
+					{
+						if ((ffd.cFileName[0] != L'.' || ffd.cFileName[1] != L'\0' && (ffd.cFileName[1] != L'.' || ffd.cFileName[2] != L'\0'))
+							&& (!filter_dir || filter_dir(ffd, item)))
+						{
+							queue.insert(insert_index, item / ffd.cFileName);
+						}
+					}
+					else
+					{
+						if (callback(ffd, item))
+						{
+							ret = item / ffd.cFileName;
+							break;
+						}
+					}
 				}
-			}
-			else if (_stricmp(filename.c_str(), file_name.c_str()) == 0)
-			{
-				result = path_val / filename;
+				while (FindNextFileW(handle, &ffd));
 				FindClose(handle);
-				return true;
+				if (!ret.empty()) return ret;
 			}
 		}
-		while (FindNextFileW(handle, &ffd));
-
-		FindClose(handle);
-		return false;
+		return ret;
 	}
 
 	#ifndef USE_SIMPLE
-	std::vector<byte> read_file(const path& filename)
+	bool try_read_file(const path& filename, blob& result)
 	{
 		if (!exists(filename))
 		{
-			LOG_ERROR() << "File not found: " << filename;
-			return std::vector<byte>();
+			return false;
 		}
 
 		std::ifstream file(filename.wstring(), std::ios::binary);
@@ -336,9 +366,56 @@ namespace utils
 		const auto file_size = file.tellg();
 		file.seekg(0, std::ios::beg);
 
-		std::vector<byte> vec;
-		vec.reserve(file_size);
-		vec.insert(vec.begin(), std::istream_iterator<byte>(file), std::istream_iterator<byte>());
+		result.resize(file_size);
+		file.read(result.data(), result.size());
+		return true;
+	}
+
+	blob read_file(const path& filename)
+	{
+		if (!exists(filename))
+		{
+			LOG(ERROR) << "File not found: " << filename;
+			return blob();
+		}
+
+		std::ifstream file(filename.wstring(), std::ios::binary);
+		file.unsetf(std::ios::skipws);
+
+		file.seekg(0, std::ios::end);
+		const auto file_size = file.tellg();
+		file.seekg(0, std::ios::beg);
+
+		blob vec;
+		vec.resize(file_size);
+		file.read(&vec[0], vec.size());
+		return vec;
+	}
+
+	void write_file(const path& filename, const blob& data)
+	{
+		auto s = std::ofstream(filename.wstring(), std::ios::binary);
+		std::copy(data.begin(), data.end(), std::ostream_iterator<char>(s));
+	}
+
+	std::string read_file_str(const path& filename)
+	{
+		if (!exists(filename))
+		{
+			LOG(ERROR) << "File not found: " << filename;
+			return std::string();
+		}
+
+		std::ifstream file(filename.wstring(), std::ios::binary);
+		file.unsetf(std::ios::skipws);
+
+		file.seekg(0, std::ios::end);
+		const auto file_size = file.tellg();
+		file.seekg(0, std::ios::beg);
+
+		std::string vec;
+		vec.resize(file_size);
+		file.read(&vec[0], vec.size());
 		return vec;
 	}
 	#endif
