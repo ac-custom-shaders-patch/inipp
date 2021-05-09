@@ -10,12 +10,12 @@
 #include <utility>
 
 #ifdef USE_SIMPLE
-	#include "ini_parser_lua_lib.h"
-	#define DBG(v) std::cout << "[" << __func__ << ":" << __LINE__ << "] " << #v << "=" << (v) << '\n';
-	#define LOG(v) std::cerr
-	#define HERE std::cout << __FILE__ << ":" << __func__ << ":" << __LINE__ <<  '\n';
-	#define FATAL_CRASH(x) _exit(1)
-	#define _assert(x) assert(x)
+#include "ini_parser_lua_lib.h"
+#define DBG(v) std::cout << "[" << __func__ << ":" << __LINE__ << "] " << #v << "=" << (v) << '\n';
+#define LOG(v) std::cerr
+#define HERE std::cout << __FILE__ << ":" << __func__ << ":" << __LINE__ <<  '\n';
+#define FATAL_CRASH(x) _exit(1)
+#define _assert(x) assert(x)
 #endif
 
 using namespace utils;
@@ -41,7 +41,7 @@ namespace utils
 	{
 		std_lib_data = std::move(data);
 	}
-	
+
 	struct creating_section
 	{
 		typedef std::pair<std::string, variant> item;
@@ -897,20 +897,20 @@ namespace utils
 		const path& file, ini_parser_lua_params& lua_params)
 	{
 		const auto L = lua_params.lua_get_state();
-		
+
 		auto ret = luaL_loadstring(L, ("return __conv_result(" + expr + ")").c_str());
 		if (ret == LUA_ERRSYNTAX)
 		{
 			ret = luaL_loadstring(L, ("return __conv_result((function() " + expr + " end)())").c_str());
 		}
-		
+
 		if (ret == LUA_ERRSYNTAX)
 		{
 			LOG(ERROR) << "Failed to process `" << expr << "`: syntax error";
 			include_value = false;
 			return;
 		}
-		
+
 		if (ret == LUA_ERRMEM)
 		{
 			LOG(ERROR) << "Failed to process `" << expr << "`: out of memory trying to load expression";
@@ -1235,6 +1235,7 @@ namespace utils
 		}
 
 		std::string name;
+		str_view default_value;
 		int substr_from = 0;
 		int substr_to = std::numeric_limits<int>::max();
 		bool with_fallback;
@@ -1245,8 +1246,8 @@ namespace utils
 
 		explicit variable_info(std::string name) : name(std::move(name)), with_fallback(true), is_required(false) {}
 
-		variable_info(std::string name, const int from, const int to, const special_mode mode, const bool is_required)
-			: name(std::move(name)), substr_from(from), substr_to(to), with_fallback(false), is_required(is_required), mode(mode) {}
+		variable_info(std::string name, str_view default_value, const int from, const int to, const special_mode mode, const bool is_required)
+			: name(std::move(name)), default_value(default_value), substr_from(from), substr_to(to), with_fallback(false), is_required(is_required), mode(mode) {}
 
 		bool get_values(const std::shared_ptr<variable_scope>& include_vars, std::vector<std::string>& result, bool& include_value, const value_finalizer& dest)
 		{
@@ -1258,6 +1259,12 @@ namespace utils
 					include_value = false;
 				}
 
+				if (!default_value.empty())
+				{
+					result.emplace_back(default_value.str());
+					return true;
+				}
+				
 				switch (mode)
 				{
 					case special_mode::vec4: result.emplace_back("0"); // NOLINT(bugprone-branch-clone)
@@ -1524,7 +1531,7 @@ namespace utils
 			return true;
 		}
 
-		void substitute(const std::shared_ptr<variable_scope>& include_vars, const std::string& prefix, const std::string& postfix, bool& include_value,
+		void substitute(const std::shared_ptr<variable_scope>& include_vars, const str_view& prefix, const str_view& postfix, bool& include_value,
 			const value_finalizer& dest, const bool expr_mode)
 		{
 			std::vector<std::string> result;
@@ -1536,8 +1543,8 @@ namespace utils
 				if (!prefix.empty() || !postfix.empty())
 				{
 					dest.add(with_fallback
-						? prefix + wrap_special(SPECIAL_MISSING_VARIABLE, name) + postfix
-						: prefix + postfix);
+						? prefix.str() + wrap_special(SPECIAL_MISSING_VARIABLE, name) + postfix.str()
+						: prefix.str() + postfix.str());
 				}
 				else if (with_fallback)
 				{
@@ -1552,7 +1559,7 @@ namespace utils
 
 			if (expr_mode)
 			{
-				auto s = prefix;
+				auto s = prefix.str();
 				if (result.empty())
 				{
 					s += "nil";
@@ -1591,7 +1598,7 @@ namespace utils
 			{
 				for (const auto& r : result)
 				{
-					auto s = prefix;
+					auto s = prefix.str();
 					s += r;
 					s += postfix;
 					dest.add(s);
@@ -1607,7 +1614,7 @@ namespace utils
 		{
 			if (set_ptr) *set_ptr = false;
 			return default_value;
-		}		
+		}
 		if (set_ptr) *set_ptr = true;
 		return ishex(c) ? int(std::strtoull(c + 2, nullptr, 16)) : int(std::stoll(c, nullptr, 10));
 	}
@@ -1631,6 +1638,7 @@ namespace utils
 		auto from = stoi(pieces, 1, 1, &from_set);
 		auto to = stoi(pieces, 2, from_set ? 1 : SPECIAL_RANGE_LIMIT) + from;
 		if (size > 3 && pieces[2].empty()) to = stoi(pieces, 3, from_set ? from + 1 : SPECIAL_RANGE_LIMIT);
+		str_view default_value;
 		auto mode = variable_info::special_mode::none;
 		auto is_required = false;
 		for (auto i = 1U; i < size; i++)
@@ -1650,6 +1658,7 @@ namespace utils
 			else if (piece == "num" || piece == "number") mode = variable_info::special_mode::number;
 			else if (piece == "bool" || piece == "boolean") mode = variable_info::special_mode::boolean;
 			else if (piece == "str" || piece == "string") mode = variable_info::special_mode::string;
+			else if (piece.starts_with("or=")) default_value = piece.substr(3U);
 			if (piece == "required" || piece == "?") is_required = true;
 		}
 		if (from == 0 && dest.params->lua_params->error_handler)
@@ -1658,23 +1667,23 @@ namespace utils
 		}
 		if (from > 0) from--;
 		if (to > 0) to--;
-		return {pieces[0].str(), from, to, mode, is_required};
+		return {pieces[0].str(), default_value, from, to, mode, is_required};
 	}
 
-	static variable_info check_variable(const std::string& s, const value_finalizer& dest)
+	static variable_info check_variable(const str_view& s, const value_finalizer& dest)
 	{
 		if (s.size() < 2) return {};
 		if (s[0] != '$') return {};
 		if (s[1] == '{' && s[s.size() - 1] == '}')
 		{
-			return get_parametrized_variable_info(str_view(s).substr(2, s.size() - 3), dest);
+			return get_parametrized_variable_info(s.substr(2, s.size() - 3), dest);
 		}
-		const auto vname = s.substr(1);
+		const auto vname = s.substr(1U);
 		if (!is_identifier(vname)) return {};
-		return variable_info{vname};
+		return variable_info{vname.str()};
 	}
 
-	static void substitute_variable(const std::string& value, const std::shared_ptr<variable_scope>& include_vars, bool& include_value, const value_finalizer& dest,
+	static void substitute_variable(const str_view& value, const std::shared_ptr<variable_scope>& include_vars, bool& include_value, const value_finalizer& dest,
 		const int stack, std::vector<std::string>* referenced_variables)
 	{
 		#if defined _DEBUG && defined USE_SIMPLE
@@ -1696,12 +1705,12 @@ namespace utils
 				var.substitute(include_vars, include_value, finalizer);
 				for (const auto& v : temp)
 				{
-					substitute_variable(v, include_vars, include_value, dest, stack + 1, referenced_variables);
+					substitute_variable(str_view(v), include_vars, include_value, dest, stack + 1, referenced_variables);
 				}
 				return;
 			}
 
-			const auto expr_mode = starts_with(value, SPECIAL_CALCULATE_STR);
+			const auto expr_mode = value.starts_with(SPECIAL_CALCULATE_STR);
 
 			{
 				// Concatenation with ${VariableName}
@@ -1716,7 +1725,7 @@ namespace utils
 					var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end + 1), include_value, finalizer, expr_mode);
 					for (const auto& v : temp)
 					{
-						substitute_variable(v, include_vars, include_value, dest, stack + 1, referenced_variables);
+						substitute_variable(str_view(v), include_vars, include_value, dest, stack + 1, referenced_variables);
 					}
 					return;
 				}
@@ -1724,11 +1733,11 @@ namespace utils
 
 			{
 				// Concatenation with $VariableName
-				const auto var_begin = value.find_first_of('$', 1);
+				const auto var_begin = value.find_first_of('$', 1U);
 				if (var_begin != std::string::npos)
 				{
 					auto var_end = var_begin + 1;
-					for (auto i = var_begin + 1, s = value.size(); i < s; i++)
+					for (auto i = var_begin + 1, s = size_t(value.size()); i < s; i++)
 					{
 						if (is_identifier_part(value[i])) var_end++;
 						else break;
@@ -1742,7 +1751,7 @@ namespace utils
 						var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end), include_value, finalizer, expr_mode);
 						for (const auto& v : temp)
 						{
-							substitute_variable(v, include_vars, include_value, dest, stack + 1, referenced_variables);
+							substitute_variable(str_view(v), include_vars, include_value, dest, stack + 1, referenced_variables);
 						}
 						return;
 					}
@@ -1751,7 +1760,7 @@ namespace utils
 		}
 
 		// Raw value
-		dest.add(value);
+		dest.add(value.str());
 	}
 
 	struct section_template
@@ -1967,7 +1976,7 @@ namespace utils
 				}
 				else
 				{
-					substitute_variable(piece, sc, include_value_ret, get_value_finalizer(key, include_value_ret, result), 0, referenced_variables);
+					substitute_variable(str_view(piece), sc, include_value_ret, get_value_finalizer(key, include_value_ret, result), 0, referenced_variables);
 				}
 			}
 			return include_value_ret;
