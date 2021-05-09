@@ -21,21 +21,25 @@
 
 namespace utils
 {
-	bool path::operator==(const path& other) const
+	static bool path_cmp(const char* a, const char* b, size_t size)
 	{
-		const auto& d0 = data_;
-		const auto& d1 = other.data_;
-		const auto s0 = d0.size();
-		if (s0 != d1.size()) return false;
-		for (auto i = 0U; i < s0; ++i)
+		for (auto i = 0U; i < size; ++i)
 		{
-			auto c0 = tolower(d0[i]);
-			auto c1 = tolower(d1[i]);
+			auto c0 = tolower(a[i]);
+			auto c1 = tolower(b[i]);
 			if (c0 == '/') c0 = '\\';
 			if (c1 == '/') c1 = '\\';
 			if (c0 != c1) return false;
 		}
 		return true;
+	}
+
+	bool path::operator==(const path& other) const
+	{
+		const auto& d0 = data_;
+		const auto& d1 = other.data_;
+		const auto s0 = d0.size();
+		return s0 == d1.size() && path_cmp(d0.c_str(), d1.c_str(), s0);
 	}
 
 	bool path::operator!=(const path& other) const
@@ -123,6 +127,13 @@ namespace utils
 		const auto e = data_.find_last_of("/\\");
 		const auto s = data_.find_last_of('.');
 		return (s != std::string::npos && (e == std::string::npos || e < s) ? data_.substr(0, s) : data_) + extension;
+	}
+
+	bool path::is_child_of(const path& parent) const
+	{
+		return data_.size() > parent.data_.size()
+			&& (data_[parent.data_.size()] == '/' || data_[parent.data_.size()] == '\\')
+			&& path_cmp(data_.c_str(), parent.data_.c_str(), parent.data_.size());
 	}
 
 	path path::operator/(const path& more) const
@@ -248,7 +259,7 @@ namespace utils
 		paths[special_folder::ac_results] = path(result) / "Assetto Corsa" / "out";
 	}
 
-	path get_special_folder_path(const special_folder id)
+	const path& get_special_folder_path(const special_folder id)
 	{
 		const auto found = paths.find(id);
 		return found != paths.end() ? found->second : default_path;
@@ -392,7 +403,7 @@ namespace utils
 		return vec;
 	}
 
-	void write_file(const path& filename, const blob& data)
+	void write_file(const path& filename, const blob_view& data)
 	{
 		auto s = std::ofstream(filename.wstring(), std::ios::binary);
 		std::copy(data.begin(), data.end(), std::ostream_iterator<char>(s));

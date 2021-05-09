@@ -128,6 +128,7 @@ void do_debug_run()
 {
 	SetConsoleOutputCP(65001);
 	auto handler = error_handler(false, true);
+	auto reader = simple_reader();
 	const auto terminal_good = rang::rang_implementation::supportsColor()
 		&& rang::rang_implementation::isTerminal(std::cout.rdbuf())
 		&& rang::rang_implementation::supportsAnsi(std::cout.rdbuf());
@@ -142,7 +143,7 @@ void do_debug_run()
 			if (filename.filename().string()[2] != '_') continue;
 
 			std::cout << STYLE_QUEUE << u8"• Testing " << filename.filename_without_extension().string().substr(3) << u8"… " << rang::style::reset;
-			auto data = utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, simple_reader(), handler).finalize().to_ini();
+			auto data = utils::ini_parser(true, {}).allow_lua(true).set_reader(&reader).set_error_handler(&handler).parse_file(filename).finalize().to_ini();
 			auto required = filename.parent_path() / filename.filename_without_extension() + "__result.ini";
 
 			if (exists(required))
@@ -172,7 +173,7 @@ void do_debug_run()
 	{
 		if (clear) std::cout << u8"[2J[u";
 		std::cout << STYLE_QUEUE << u8"• Running developing input:" << rang::style::reset << std::endl;
-		std::cout << utils::ini_parser(true, {}).allow_lua(true).parse_file(dev_input, simple_reader(), handler).finalize().to_ini();
+		std::cout << utils::ini_parser(true, {}).allow_lua(true).set_reader(&reader).set_error_handler(&handler).parse_file(dev_input).finalize().to_ini();
 	}
 
 	for (const auto& entry : std::experimental::filesystem::directory_iterator("performance"))
@@ -185,8 +186,8 @@ void do_debug_run()
 			const auto file_size = double(get_file_size(filename));
 
 			std::cout << STYLE_QUEUE << u8"• Measuring performance of " << filename.filename_without_extension().string().substr(3) << u8"… " << rang::style::reset;
-			caching_reader reader;
-			if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
+			caching_reader c_reader;
+			if (utils::ini_parser(true, {}).allow_lua(true).set_reader(&c_reader).set_error_handler(&handler).parse_file(filename).finalize().get_sections().empty())
 			{
 				throw std::runtime_error("Unexpected");
 			}
@@ -197,7 +198,7 @@ void do_debug_run()
 				const auto run_count = 100;
 				for (auto i = 0; i < run_count; i++)
 				{
-					if (utils::ini_parser(true, {}).allow_lua(true).parse_file(filename, reader, handler).finalize().get_sections().empty())
+					if (utils::ini_parser(true, {}).allow_lua(true).set_reader(&c_reader).set_error_handler(&handler).parse_file(filename).finalize().get_sections().empty())
 					{
 						throw std::runtime_error("Unexpected");
 					}
@@ -281,12 +282,13 @@ int main(int argc, const char* argv[])
 	}
 
 	auto handler = error_handler(quiet, verbose);
+	auto reader = simple_reader();
 	if (input_files.empty())
 	{
 		std::istreambuf_iterator<char> begin(std::cin), end;
 		std::string s(begin, end);
 		auto processed = serialize(
-			utils::ini_parser(allow_includes, resolve_within).allow_lua(allow_lua).parse(s, simple_reader(), handler).finalize(),
+			utils::ini_parser(allow_includes, resolve_within).allow_lua(allow_lua).set_reader(&reader).set_error_handler(&handler).parse(s).finalize(),
 			output_format, output_ini);
 		if (!destination.empty()) std::ofstream(destination) << processed;
 		else std::cout << processed;
@@ -297,7 +299,7 @@ int main(int argc, const char* argv[])
 	for (const auto& f : input_files)
 	{
 		auto processed = serialize(
-			utils::ini_parser(allow_includes, resolve_within).allow_lua(allow_lua).parse_file(f, simple_reader(), handler).finalize(),
+			utils::ini_parser(allow_includes, resolve_within).allow_lua(allow_lua).set_reader(&reader).set_error_handler(&handler).parse_file(f).finalize(),
 			output_format, output_ini);
 		if (!destination.empty())
 		{

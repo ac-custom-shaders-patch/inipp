@@ -1,185 +1,24 @@
 ﻿#include "stdafx.h"
 #include "ini_parser.h"
-#include "ini_parser_lua_lib.h"
 #include <iomanip>
 #include <lua.hpp>
 #include <utility/alphanum.h>
 #include <utility/json.h>
+#include <utility/str_view.h>
 #include <utility/string_parse.h>
 #include <utility/variant.h>
 #include <utility>
 
 #ifdef USE_SIMPLE
-#define DBG(v) std::cout << "[" << __func__ << ":" << __LINE__ << "] " << #v << "=" << (v) << '\n';
-#define LOG(v) std::cerr
-#define HERE std::cout << __FILE__ << ":" << __func__ << ":" << __LINE__ <<  '\n';
-#define FATAL_CRASH(x) exit(1)
-#define _assert(x) assert(x)
+	#include "ini_parser_lua_lib.h"
+	#define DBG(v) std::cout << "[" << __func__ << ":" << __LINE__ << "] " << #v << "=" << (v) << '\n';
+	#define LOG(v) std::cerr
+	#define HERE std::cout << __FILE__ << ":" << __func__ << ":" << __LINE__ <<  '\n';
+	#define FATAL_CRASH(x) _exit(1)
+	#define _assert(x) assert(x)
 #endif
 
-inline bool is_whitespace(char c)
-{
-	return c == ' ' || c == '\t' || c == '\r';
-}
-
-struct str_view
-{
-	str_view() {}
-
-	template <std::size_t N>
-	explicit str_view(char const (&cs)[N])
-		: data_(cs), data_size_(uint32_t(N - 1)), length_(uint32_t(N - 1)) { }
-
-	explicit str_view(const std::string& data)
-		: str_view(data, 0U, uint32_t(data.size())) { }
-
-	str_view(const std::string& data, uint32_t start)
-		: str_view(data, start, uint32_t(data.size())) { }
-
-	str_view(const std::string& data, uint32_t start, uint32_t length)
-		: str_view(data.c_str(), uint32_t(data.size()), start, length) {}
-
-	str_view(const char* data, uint32_t data_size, uint32_t start, uint32_t length)
-		: data_(data), data_size_(data_size), start_(start), length_(length)
-	{
-		if (start_ + length_ > data_size)
-		{
-			length_ = data_size > start_ ? data_size - start_ : 0;
-		}
-	}
-
-	size_t find_first_of(char c, uint32_t index = 0U) const
-	{
-		for (auto i = index; i < length_; ++i)
-		{
-			if (data_[start_ + i] == c) return i;
-		}
-		return std::string::npos;
-	}
-
-	char operator[](uint32_t index) const
-	{
-		return data_[start_ + index];
-	}
-
-	void trim()
-	{
-		for (; length_ > 0U && is_whitespace(data_[start_ + length_ - 1]); --length_) {}
-		for (; length_ > 0U && is_whitespace(data_[start_]); ++start_, --length_) {}
-	}
-
-	bool empty() const { return length_ == 0U; }
-
-	str_view substr(uint32_t offset) const
-	{
-		if (offset >= length_) return {};
-		return {data_, data_size_, start_ + offset, length_ - offset};
-	}
-
-	str_view substr(uint32_t offset, uint32_t length) const
-	{
-		if (offset >= length_) return {};
-		return {data_, data_size_, start_ + offset, std::min(length, length_ - offset)};
-	}
-
-	template <std::size_t N>
-	bool equals(char const (&cs)[N]) const
-	{
-		return N == 1 ? empty() : length_ == N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_], cs);
-	}
-
-	template <std::size_t N>
-	bool starts_with(char const (&cs)[N]) const
-	{
-		return N == 1 || length_ >= N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_], cs);
-	}
-
-	template <std::size_t N>
-	bool ends_with(char const (&cs)[N]) const
-	{
-		return N == 1 || length_ >= N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_ + length_ - (N - 1)], cs);
-	}
-
-	uint32_t hash_code() const
-	{
-		if (hash_code_ == 0)
-		{
-			const auto code = utils::hash_code(&data_[start_], length_);
-			((str_view*)this)->hash_code_ = uint32_t(code >> 32) ^ uint32_t(code);
-		}
-		return hash_code_;
-	}
-
-	uint32_t size() const
-	{
-		return length_;
-	}
-
-	std::string str() const
-	{
-		return length_ ? std::string(&data_[start_], length_) : std::string();
-	}
-
-	const char* data() const
-	{
-		return length_ > 0 ? &data_[start_] : "";
-	}
-
-	bool operator==(const str_view& o) const
-	{
-		return size() == o.size() && (empty() || memcmp(&data_[start_], &o.data_[o.start_], length_) == 0);
-	}
-	
-	template <std::size_t N>
-	bool operator==(char const (&cs)[N]) const
-	{
-		return N == 1 ? empty() : length_ == N - 1 && utils::tpl_equals<(N - 1) * sizeof(char)>(&data_[start_], cs);
-	}
-
-	std::vector<str_view> split(char separator, bool skip_empty, bool trim_result) const
-	{
-		std::vector<str_view> result;
-		auto index = 0U;
-		const auto size = this->size();
-		while (index < size)
-		{
-			auto next = find_first_of(separator, index);
-			if (next == std::string::npos) next = uint32_t(size);
-			auto piece = substr(index, uint32_t(next) - index);
-			if (trim_result) piece.trim();
-			if (!skip_empty || !piece.empty()) result.push_back(piece);
-			index = uint32_t(next) + 1;
-		}
-		return result;
-	}
-
-	struct hash_fn
-	{
-		size_t operator()(const str_view& pos) const
-		{
-			return pos.hash_code();
-		}
-	};
-
-private:
-	const char* data_{};
-	uint32_t data_size_{};
-	uint32_t start_{};
-	uint32_t length_{};
-	uint32_t hash_code_{};
-};
-
-std::string& operator +=(std::string& l, const str_view& r)
-{
-	if (r.size() > 0U)
-	{
-		const auto l_size = l.size();
-		l.resize(l_size + r.size());
-		memcpy(&l[l_size], r.data(), r.size());
-	}
-	return l;
-}
-
+using namespace utils;
 typedef std::vector<str_view> variant_sv;
 
 namespace std
@@ -189,13 +28,20 @@ namespace std
 	{
 		bool operator()(const str_view& lhs, const str_view& rhs) const
 		{
-			return lhs.hash_code() < rhs.hash_code();
+			return lhs.hash_code_u32() < rhs.hash_code_u32();
 		}
 	};
 }
 
 namespace utils
 {
+	static pblob std_lib_data;
+
+	void ini_parser::set_std_lib(pblob data)
+	{
+		std_lib_data = std::move(data);
+	}
+	
 	struct creating_section
 	{
 		typedef std::pair<std::string, variant> item;
@@ -276,11 +122,6 @@ namespace utils
 	auto gen_find(const std::unordered_map<std::string, TValue>& l, const std::string& a)
 	{
 		return l.find(a);
-	}
-
-	inline bool is_whitespace(char c)
-	{
-		return c == ' ' || c == '\t' || c == '\r';
 	}
 
 	inline bool is_special_symbol(char c, char& maps_to, bool quoted)
@@ -493,20 +334,6 @@ namespace utils
 		}
 	};
 
-	struct script_params
-	{
-		path file;
-		ini_parser_error_handler* error_handler{};
-		bool allow_includes = false;
-		bool allow_override = true;
-		bool allow_lua = false;
-		bool erase_referenced = false;
-
-		script_params() = default;
-		script_params(const script_params& other) = delete;
-		script_params& operator=(const script_params& other) = delete;
-	};
-	
 	#define SPECIAL_CALCULATE_STR "[[SPEC:CALCULATE:"
 	#define SPECIAL_END_STR ":SPEC]]"
 
@@ -522,204 +349,560 @@ namespace utils
 		return special + value + SPECIAL_END;
 	}
 
-	static thread_local struct
+	static void lua_parse(lua_State* L, int index, variant& dest, const std::string& prefix, const std::string& postfix)
 	{
-		lua_State* ptr{};
-		bool is_clean{};
-		uint32_t used{};
+		if (lua_istable(L, index))
+		{
+			lua_pushvalue(L, index); // stack now contains: -1 => table
+			lua_pushnil(L);          // stack now contains: -1 => nil; -2 => table
+			while (lua_next(L, -2))
+			{
+				// stack now contains: -1 => value; -2 => key; -3 => table
+				// copy the key so that lua_tostring does not modify the original
+				lua_pushvalue(L, -2); // stack now contains: -1 => key; -2 => value; -3 => key; -4 => table
+				lua_parse(L, -2, dest, prefix, postfix);
+				// pop value + copy of key, leaving original key
+				lua_pop(L, 2);
+				// stack now contains: -1 => key; -2 => table
+			}
+			// stack now contains: -1 => table (when lua_next returns 0 it pops the key
+			// but does not push anything.)
+			// Pop table
+			lua_pop(L, 1);
+			// Stack is now the same as it was on entry to this function
+		}
+		else if (lua_isnil(L, index))
+		{
+			// dest.data().push_back(prefix + "<NIL>" + postfix);
+		}
+		else if (lua_isboolean(L, index))
+		{
+			dest.data().push_back(prefix + (lua_toboolean(L, index) ? "1" : "0") + postfix);
+		}
+		else
+		{
+			const auto s = lua_tolstring(L, index, nullptr);
+			dest.data().push_back(s ? prefix + s + postfix : prefix + postfix);
+		}
+	}
+
+	static int lua_push(lua_State* L, const variant& v, int force_type = -1)
+	{
+		if (force_type == LUA_TBOOLEAN)
+		{
+			lua_pushboolean(L, v.as<bool>());
+			return 1;
+		}
+
+		if (force_type == LUA_TNUMBER)
+		{
+			lua_pushnumber(L, v.as<double>());
+			return 1;
+		}
+
+		if (force_type == LUA_TSTRING)
+		{
+			lua_pushstring(L, v.as<std::string>().c_str());
+			return 1;
+		}
+
+		// Pushing variant as a bunch of values, turning strings to numbers when possible
+		if (force_type == LUA_TTABLE) lua_createtable(L, int(v.data().size()), 0);
+		auto index = 0;
+		for (auto s : v.data())
+		{
+			if (s.empty())
+			{
+				lua_pushnil(L);
+				if (force_type == LUA_TTABLE) lua_rawseti(L, -2, ++index);
+				continue;
+			}
+
+			if (!s.empty() && (isdigit(s[0]) || s[0] == '-' && (isdigit(s[1]) || s[1] == '.' && isdigit(s[2])) || s[0] == '.' && isdigit(s[1])))
+			{
+				char* end;
+
+				if (isdigit(s[0]) || s[0] == '-' && isdigit(s[1]))
+				{
+					const auto i = std::strtol(s.c_str(), &end, 10);
+					if (end == &s[0] + s.size())
+					{
+						lua_pushinteger(L, i);
+						if (force_type == LUA_TTABLE) lua_rawseti(L, -2, ++index);
+						continue;
+					}
+				}
+
+				const auto f = std::strtof(s.c_str(), &end);
+				if (end == &s[0] + s.size())
+				{
+					lua_pushnumber(L, f);
+					if (force_type == LUA_TTABLE) lua_rawseti(L, -2, ++index);
+					continue;
+				}
+			}
+
+			lua_pushstring(L, s.c_str());
+			if (force_type == LUA_TTABLE) lua_rawseti(L, -2, ++index);
+		}
+		return force_type == LUA_TTABLE ? 1 : int(v.data().size());
+	}
+
+	struct match_string
+	{
+		match_string(const char* c)
+			: c_(c)
+		{
+			size_ = 0;
+			required_ = 0;
+			mode_ = test_mode::complete;
+			if (!c_) return;
+			for (auto i = 0U; c_[i]; ++i)
+			{
+				if (c_[i] == '?')
+				{
+					if (i == 0U)
+					{
+						mode_ = test_mode::ends_with;
+					}
+					else if (c_[i + 1])
+					{
+						mode_ = test_mode::pattern;
+					}
+					else if (mode_ != test_mode::pattern)
+					{
+						mode_ = mode_ == test_mode::ends_with ? test_mode::contains : test_mode::starts_with;
+					}
+				}
+				else
+				{
+					++required_;
+				}
+				++size_;
+			}
+			if (size_ == 1 && c_[0] == '?') c_ = nullptr;
+			else if (mode_ == test_mode::contains || mode_ == test_mode::ends_with) ++c_;
+		}
+
+		bool test(const std::string& s) const
+		{
+			if (!c_) return true;
+			if (s.size() < required_) return false;
+			switch (mode_)
+			{
+				case test_mode::complete: return s.size() == required_ && memcmp(s.c_str(), c_, size_ + 1) == 0;
+				case test_mode::starts_with: return s.size() >= required_ && memcmp(s.c_str(), c_, required_) == 0;
+				case test_mode::ends_with: return s.size() >= required_ && memcmp(&s[s.size() - required_], c_, required_) == 0;
+				case test_mode::contains: return find(s);
+				case test_mode::pattern: return match_pattern(s);
+				default: return false;
+			}
+		}
+
+		bool test(const variant& v) const
+		{
+			if (!c_) return true;
+			for (const auto& i : v.data())
+				// for (auto i : v.data())
+			{
+				if (test(i)) return true;
+			}
+			return false;
+		}
+
+		bool empty() const { return !c_; }
+		bool fuzzy() const { return mode_ != test_mode::complete; }
+
+		const char* c_str() const { return c_; }
+
+	private:
+		const char* c_;
+		size_t size_;
+		size_t required_;
+		enum class test_mode
+		{
+			complete,
+			starts_with,
+			ends_with,
+			contains,
+			pattern
+		} mode_;
+
+		bool find(const std::string& s) const
+		{
+			if (s.size() < required_) return false;
+			for (auto i = 0U; i <= s.size() - required_; ++i)
+			{
+				if (memcmp(&s[i], c_, required_) == 0) return true;
+			}
+			return false;
+		}
+
+		bool match_pattern(const std::string& candidate, uint32_t p = 0, uint32_t c = 0) const
+		{
+			if (p >= size_)
+			{
+				for (; c < candidate.size(); c++)
+				{
+					const auto f = candidate[c];
+					if (f != ' ' && f != '\t') return false;
+				}
+				return true;
+			}
+
+			if (c_[p] == '?')
+			{
+				for (; c < candidate.size(); c++)
+				{
+					if (match_pattern(candidate, p + 1U, c)) return true;
+				}
+				return match_pattern(candidate, p + 1U, c);
+			}
+			return c_[p] == candidate[c] && match_pattern(candidate, p + 1U, c + 1U);
+		}
+	};
+
+	using section_named = std::pair<std::string, creating_section>;
+	using sections_list = std::vector<section_named>;
+	using sections_map = std::unordered_map<std::string, resulting_section>;
+
+	struct ini_parser_lua_params
+	{
+		ini_parser_error_handler* error_handler{};
+		ini_parser_data_provider* data_provider{};
+		sections_list* sections{};
+
+		lua_State* lua_ptr{};
 		std::vector<std::string> imported;
-	} lua_state;
 
-	void ini_parser::reset_expressions_state()
-	{
-		if (lua_state.ptr)
+		ini_parser_lua_params(const ini_parser_lua_params&) = delete;
+		ini_parser_lua_params& operator=(const ini_parser_lua_params&) = delete;
+
+		ini_parser_lua_params(sections_list* sections) : sections(sections) { }
+		~ini_parser_lua_params() { if (lua_ptr) lua_close(lua_ptr); }
+
+		template <typename Callback>
+		void register_fn(const char* name, Callback callback)
 		{
-			lua_close(lua_state.ptr);
-			lua_state.ptr = nullptr;
+			lua_pushlightuserdata(lua_ptr, this);
+			lua_pushcclosure(lua_ptr, callback, 1);
+			lua_setglobal(lua_ptr, name);
 		}
-	}
 
-	static ini_parser_data_provider*& global_provider()
-	{
-		static ini_parser_data_provider* value{};
-		return value;
-	}
-
-	static ini_parser_data_provider*& thread_provider()
-	{
-		static thread_local ini_parser_data_provider* value{};
-		return value;
-	}
-
-	disposable ini_parser::set_data_provider(ini_parser_data_provider* provider)
-	{
-		if (!provider) return {};
-		if (thread_provider())
+		static ini_parser_lua_params* get_that(lua_State* L)
 		{
-			FATAL_CRASH("Provider is set already");
+			auto ret = (ini_parser_lua_params*)lua_touserdata(L, lua_upvalueindex(1));
+			return ret;
 		}
-		thread_provider() = provider;
-		return {[] { thread_provider() = nullptr; }};
-	}
 
-	disposable ini_parser::set_global_data_provider(ini_parser_data_provider* provider)
-	{
-		if (!provider) return {};
-		if (global_provider())
+		static int read_fn(lua_State* L)
 		{
-			FATAL_CRASH("Global provider is set already");
-		}
-		global_provider() = provider;
-		return {[] { global_provider() = nullptr; }};
-	}
+			const auto that = get_that(L);
 
-	disposable ini_parser::set_data_provider_own(ini_parser_data_provider* provider)
-	{
-		if (!provider) return {};
-		if (thread_provider())
-		{
-			FATAL_CRASH("Provider is set already");
-		}
-		thread_provider() = provider;
-		return {
-			[=]
+			/* get number of arguments */
+			const auto n = lua_gettop(L);
+			if (n < 1 || n > 2)
 			{
-				thread_provider() = nullptr;
-				delete provider;
-			}
-		};
-	}
-
-	disposable ini_parser::set_global_data_provider_own(ini_parser_data_provider* provider)
-	{
-		if (!provider) return {};
-		if (global_provider())
-		{
-			FATAL_CRASH("Provider is set already");
-		}
-		global_provider() = provider;
-		return {
-			[=]
-			{
-				global_provider() = nullptr;
-				delete provider;
-			}
-		};
-	}
-
-	static int read_fn(lua_State* L)
-	{
-		/* get number of arguments */
-		const auto n = lua_gettop(L);
-		if (n != 2)
-		{
-			lua_pushstring(L, "load: needs path and default value");
-			lua_error(L);
-			return 0;
-		}
-
-		auto thread = thread_provider();
-		auto global = global_provider();
-		if (!thread && !global)
-		{
-			lua_pushstring(L, "load: data provider is not set");
-			lua_error(L);
-			return 0;
-		}
-
-		try
-		{
-			const auto p = lua_tostring(L, 1);
-			if (p == nullptr)
-			{
-				lua_pushstring(L, "load: path is not a string");
+				lua_pushstring(L, "load: needs path and default value");
 				lua_error(L);
 				return 0;
 			}
 
-			if (lua_isnumber(L, 2))
+			if (!that->data_provider)
 			{
-				auto v = float(lua_tonumber(L, 2));
-				if ((!thread || !thread->read_number(p, v)) && global)
-				{
-					global->read_number(p, v);
-				}
-				lua_pushnumber(L, v);
-				return 1;
+				lua_pushstring(L, "load: data provider is not set");
+				lua_error(L);
+				return 0;
 			}
 
-			if (lua_isstring(L, 2))
+			try
 			{
-				auto v = std::string(lua_tostring(L, 2));
-				if ((!thread || !thread->read_string(p, v)) && global)
+				const auto p = lua_tostring(L, 1);
+				if (p == nullptr)
 				{
-					global->read_string(p, v);
+					lua_pushstring(L, "load: path is not a string");
+					lua_error(L);
+					return 0;
 				}
-				lua_pushstring(L, v.c_str());
-				return 1;
+
+				if (n == 1 || lua_isnoneornil(L, 2))
+				{
+					std::string v;
+					that->data_provider->read_string(p, v);
+					if (!v.empty())
+					{
+						lua_pushstring(L, v.c_str());
+					}
+					else
+					{
+						lua_pushnil(L);
+					}
+					return 1;
+				}
+
+				if (lua_isnumber(L, 2))
+				{
+					auto v = float(lua_tonumber(L, 2));
+					that->data_provider->read_number(p, v);
+					lua_pushnumber(L, v);
+					return 1;
+				}
+
+				if (lua_isstring(L, 2))
+				{
+					auto v = std::string(lua_tostring(L, 2));
+					that->data_provider->read_string(p, v);
+					lua_pushstring(L, v.c_str());
+					return 1;
+				}
+
+				if (lua_isboolean(L, 2))
+				{
+					auto v = lua_toboolean(L, 2) != 0;
+					that->data_provider->read_bool(p, v);
+					lua_pushboolean(L, v);
+					return 1;
+				}
+			}
+			catch (std::exception& e)
+			{
+				lua_pushstring(L, e.what());
+				lua_error(L);
+				return 0;
 			}
 
-			if (lua_isboolean(L, 2))
-			{
-				auto v = lua_toboolean(L, 2) != 0;
-				if ((!thread || !thread->read_bool(p, v)) && global)
-				{
-					global->read_bool(p, v);
-				}
-				lua_pushboolean(L, v);
-				return 1;
-			}
+			lua_pushnil(L);
+			return 1;
 		}
-		catch (std::exception& e)
+
+		static int refl_has_fn(lua_State* L)
 		{
-			lua_pushstring(L, e.what());
-			lua_error(L);
-			return 0;
+			const auto n = lua_gettop(L);
+			if (n < 1 || n > 3)
+			{
+				lua_pushstring(L, "has: needs section name, section name and key or section name, key and value");
+				lua_error(L);
+				return 0;
+			}
+
+			const auto that = get_that(L);
+			const match_string section = lua_tostring(L, 1);
+			const match_string key = n > 1 ? lua_tostring(L, 2) : nullptr;
+			const match_string value = n > 2 ? lua_tostring(L, 3) : nullptr;
+
+			if (const auto sections = that->sections)
+			{
+				for (const auto& p : *sections)
+				{
+					if (!section.test(p.first)) continue;
+					if (key.empty() && value.empty())
+					{
+						lua_pushboolean(L, true);
+						return 1;
+					}
+					for (const auto& k : p.second.values)
+					{
+						if (key.test(k.first) && value.test(k.second))
+						{
+							lua_pushboolean(L, true);
+							return 1;
+						}
+					}
+				}
+			}
+			lua_pushboolean(L, false);
+			return 1;
 		}
 
-		lua_pushnil(L);
-		return 1;
-	}
+		static int refl_get_fn(lua_State* L)
+		{
+			const auto n = lua_gettop(L);
+			if (n < 2 || n > 4)
+			{
+				lua_pushstring(L, "get: needs section name and key");
+				lua_error(L);
+				return 0;
+			}
 
-	static lua_State* lua_get_state()
+			const auto that = get_that(L);
+			const match_string section = lua_tostring(L, 1);
+			const match_string key = lua_tostring(L, 2);
+
+			variant value;
+			auto ret_type = -1;
+			if (n == 3)
+			{
+				ret_type = lua_type(L, 3);
+				lua_parse(L, 3, value, "", "");
+			}
+
+			if (const auto sections = that->sections)
+			{
+				for (const auto& p : *sections)
+				{
+					if (!section.test(p.first)) continue;
+					for (const auto& k : p.second.values)
+					{
+						if (key.test(k.first))
+						{
+							return lua_push(L, k.second, ret_type);
+						}
+					}
+				}
+			}
+
+			return lua_push(L, value, ret_type);
+		}
+
+		static int refl_set_fn(lua_State* L)
+		{
+			const auto n = lua_gettop(L);
+			if (n != 3)
+			{
+				lua_pushstring(L, "set: needs section name, key and value");
+				lua_error(L);
+				return 0;
+			}
+
+			const auto that = get_that(L);
+			const match_string section = lua_tostring(L, 1);
+			const match_string key = lua_tostring(L, 2);
+
+			variant value;
+			lua_parse(L, 3, value, "", "");
+
+			auto set = 0U;
+			if (const auto sections = that->sections)
+			{
+				// for (auto& p : *sections)
+				for (auto i = sections->begin(); i != sections->end();)
+				{
+					if (!section.test(i->first))
+					{
+						++i;
+						continue;
+					}
+
+					auto any_set = false;
+					for (auto j = i->second.values.begin(); j != i->second.values.end();)
+					{
+						if (key.test(j->first))
+						{
+							if (value.empty())
+							{
+								j = i->second.values.erase(j);
+							}
+							else
+							{
+								j->second = value;
+								++j;
+							}
+							++set;
+							any_set = true;
+						}
+						else
+						{
+							++j;
+						}
+					}
+
+					if (any_set && value.empty() && i->second.values.empty())
+					{
+						i = sections->erase(i);
+					}
+					else
+					{
+						if (!any_set && !key.fuzzy() && !value.empty())
+						{
+							i->second.set(key.c_str(), value);
+							++set;
+						}
+						++i;
+					}
+				}
+
+				if (set == 0U && !section.fuzzy() && !key.fuzzy() && !value.empty())
+				{
+					section_named new_section{section.c_str(), {}};
+					new_section.second.set(key.c_str(), value);
+					sections->push_back(std::move(new_section));
+					set = 1;
+				}
+			}
+
+			lua_pushnumber(L, set);
+			return 1;
+		}
+
+		lua_State* lua_get_state()
+		{
+			if (!lua_ptr)
+			{
+				lua_ptr = luaL_newstate();
+				#ifdef USE_SIMPLE
+				luaL_requiref(lua_ptr, "_G", luaopen_base, 1);
+				luaL_requiref(lua_ptr, "math", luaopen_math, 1);
+				luaL_requiref(lua_ptr, "string", luaopen_string, 1);
+				luaL_loadstring(lua_ptr, LUA_STD_LUB) || lua_pcall(lua_ptr, 0, -1, 0);
+				#else
+				LOG(INFO) << "Creating new Lua state for INI parser";
+				luaopen_base(lua_ptr);
+				luaopen_math(lua_ptr);
+				luaopen_string(lua_ptr);
+				if (std_lib_data)
+				{
+					luaL_loadbuffer(lua_ptr, std_lib_data->data(), std_lib_data->size(), "std") || lua_pcall(lua_ptr, 0, -1, 0);
+				}
+				else
+				{
+					LOG(WARNING) << "Standard INIpp Lua library is missing";
+				}
+				#endif
+				register_fn("read", read_fn);
+				register_fn("has", refl_has_fn);
+				register_fn("get", refl_get_fn);
+				register_fn("set", refl_set_fn);
+			}
+			return lua_ptr;
+		}
+	};
+
+	struct script_params
 	{
-		if (!lua_state.ptr)
-		{
-			lua_state.ptr = luaL_newstate();
-			#ifdef USE_SIMPLE
-			luaL_requiref(lua_state.ptr, "_G", luaopen_base, 1);
-			luaL_requiref(lua_state.ptr, "math", luaopen_math, 1);
-			luaL_requiref(lua_state.ptr, "string", luaopen_string, 1);
-			#else
-			luaopen_base(lua_state.ptr);
-			luaopen_math(lua_state.ptr);
-			luaopen_string(lua_state.ptr);
-			#endif
-			luaL_loadstring(lua_state.ptr, LUA_STD_LUB) || lua_pcall(lua_state.ptr, 0, -1, 0);
-			lua_register(lua_state.ptr, "read", read_fn);
-			lua_state.is_clean = true;
-		}
-		lua_state.used++;
-		return lua_state.ptr;
-	}
+		path file;
+		std::shared_ptr<ini_parser_lua_params> lua_params;
+		bool allow_includes = false;
+		bool allow_override = true;
+		bool allow_lua = false;
+		bool erase_referenced = false;
+
+		script_params(sections_list* sections_list) : lua_params(std::make_shared<ini_parser_lua_params>(sections_list)) {}
+		script_params(const script_params& other) = delete;
+		script_params& operator=(const script_params& other) = delete;
+	};
 
 	static void lua_calculate(const std::string& key, bool& include_value, variant& dest, const std::string& expr,
 		const std::string& prefix, const std::string& postfix,
-		const path& file, ini_parser_error_handler* handler)
+		const path& file, ini_parser_lua_params& lua_params)
 	{
-		const auto L = lua_get_state();
-
-		auto ret = luaL_loadstring(L, expr.c_str());
-		if (ret == LUA_ERRMEM)
+		const auto L = lua_params.lua_get_state();
+		
+		auto ret = luaL_loadstring(L, ("return __conv_result(" + expr + ")").c_str());
+		if (ret == LUA_ERRSYNTAX)
 		{
-			LOG(ERROR) << "Failed to process `" << expr << "`: out of memory trying to load expression";
-			include_value = false;
-			return;
+			ret = luaL_loadstring(L, ("return __conv_result((function() " + expr + " end)())").c_str());
 		}
-
+		
 		if (ret == LUA_ERRSYNTAX)
 		{
 			LOG(ERROR) << "Failed to process `" << expr << "`: syntax error";
+			include_value = false;
+			return;
+		}
+		
+		if (ret == LUA_ERRMEM)
+		{
+			LOG(ERROR) << "Failed to process `" << expr << "`: out of memory trying to load expression";
 			include_value = false;
 			return;
 		}
@@ -748,39 +931,16 @@ namespace utils
 				include_value = false;
 				return;
 			}
-			if (handler) handler->on_error(file, (error_msg + "\nKey: " + key + "\nCommand: " + expr).c_str());
+			if (lua_params.error_handler) lua_params.error_handler->on_error(file, (error_msg + "\nKey: " + key + "\nCommand: " + expr).c_str());
 			if (!prefix.empty() || !postfix.empty()) dest.data().push_back(prefix + postfix);
 			return;
 		}
 
-		if (lua_istable(L, -1))
-		{
-			lua_pushvalue(L, -1); // stack now contains: -1 => table
-			lua_pushnil(L);       // stack now contains: -1 => nil; -2 => table
-			while (lua_next(L, -2))
-			{
-				// stack now contains: -1 => value; -2 => key; -3 => table
-				// copy the key so that lua_tostring does not modify the original
-				lua_pushvalue(L, -2); // stack now contains: -1 => key; -2 => value; -3 => key; -4 => table
-				dest.data().push_back(prefix + lua_tostring(L, -2) + postfix);
-				// pop value + copy of key, leaving original key
-				lua_pop(L, 2);
-				// stack now contains: -1 => key; -2 => table
-			}
-			// stack now contains: -1 => table (when lua_next returns 0 it pops the key
-			// but does not push anything.)
-			// Pop table
-			lua_pop(L, 1);
-			// Stack is now the same as it was on entry to this function
-			return;
-		}
-
-		const auto s = lua_tolstring(L, -1, nullptr);
-		dest.data().push_back(s ? prefix + s + postfix : prefix + postfix);
+		lua_parse(L, -1, dest, prefix, postfix);
 	}
 
 	static void lua_register_function(const std::string& name, const variant& args, const std::string& body,
-		bool is_shared, const path& file, ini_parser_error_handler* handler)
+		const path& file, ini_parser_lua_params& lua_params)
 	{
 		std::string args_line;
 		for (auto& arg : args)
@@ -789,12 +949,11 @@ namespace utils
 			args_line += arg;
 		}
 		const auto expr = "function " + name + "(" + args_line + ")\n" + body + "\nend";
-		const auto L = lua_get_state();
-		if ((luaL_loadstring(L, expr.c_str()) || lua_pcall(L, 0, -1, 0)) && handler)
+		const auto L = lua_params.lua_get_state();
+		if ((luaL_loadstring(L, expr.c_str()) || lua_pcall(L, 0, -1, 0)) && lua_params.error_handler)
 		{
-			handler->on_error(file, lua_tolstring(L, -1, nullptr));
+			lua_params.error_handler->on_error(file, lua_tolstring(L, -1, nullptr));
 		}
-		if (!is_shared) lua_state.is_clean = false;
 	}
 
 	#ifndef USE_SIMPLE
@@ -914,26 +1073,26 @@ namespace utils
 		return false;
 	}
 
-	static void lua_import(const path& name, bool is_shared, const path& file, ini_parser_error_handler* handler)
+	static void lua_import(const path& name, const path& file, ini_parser_lua_params& lua_params)
 	{
 		auto key = name.filename().string();
 		std::transform(key.begin(), key.end(), key.begin(), tolower);
-		for (const auto& i : lua_state.imported)
+		for (const auto& i : lua_params.imported)
 		{
 			if (i == key) return;
 		}
 
-		lua_state.imported.push_back(key);
-		const auto L = lua_get_state();
+		lua_params.imported.push_back(key);
+		const auto L = lua_params.lua_get_state();
 		if (luaL_loadfile(L, name.string().c_str()))
 		{
-			handler->on_error(name, lua_errorcleanup(lua_tostring(L, -1)).c_str());
+			lua_params.error_handler->on_error(name, lua_errorcleanup(lua_tostring(L, -1)).c_str());
 			return;
 		}
 		std::string exception;
 		if (lua_safecall(L, 0, 0, exception))
 		{
-			handler->on_error(name, exception.c_str());
+			lua_params.error_handler->on_error(name, exception.c_str());
 		}
 	}
 
@@ -941,17 +1100,12 @@ namespace utils
 	{
 		std::string key;
 		variant& dest;
-		const script_params* params;
+		script_params* params;
 		bool& include_value;
 		bool process_values;
 
-		value_finalizer(std::string key, bool& include_value, variant& dest, const script_params* params, bool process_values = true)
+		value_finalizer(std::string key, bool& include_value, variant& dest, script_params* params, bool process_values = true)
 			: key(std::move(key)), dest(dest), params(params), include_value(include_value), process_values(process_values) { }
-
-		static std::string fix_expression(const std::string& expr)
-		{
-			return "return __conv_result(" + expr + ")";
-		}
 
 		void calculate(const std::string& expr, const std::string& prefix, const std::string& postfix) const
 		{
@@ -960,7 +1114,7 @@ namespace utils
 				if (!prefix.empty() || !postfix.empty()) dest.data().push_back(prefix + postfix);
 				return;
 			}
-			lua_calculate(key, include_value, dest, fix_expression(expr), prefix, postfix, params->file, params->error_handler);
+			lua_calculate(key, include_value, dest, expr, prefix, postfix, params->file, *params->lua_params);
 		}
 
 		static void unwrap(std::string& value, const std::string& type)
@@ -1020,7 +1174,7 @@ namespace utils
 				return;
 			}
 
-			if (value.find(SPECIAL_CALCULATE) == 0)
+			if (starts_with(value, SPECIAL_CALCULATE_STR))
 			{
 				auto modified = value;
 				unwrap(modified, SPECIAL_MISSING_VARIABLE);
@@ -1095,15 +1249,13 @@ namespace utils
 
 				switch (mode)
 				{
+					case special_mode::vec4: result.emplace_back("0"); // NOLINT(bugprone-branch-clone)
+					case special_mode::vec3: result.emplace_back("0");
+					case special_mode::vec2: result.emplace_back("0");
 					case special_mode::size:
 					case special_mode::length:
 					case special_mode::exists:
 					case special_mode::number: result.emplace_back("0");
-						return true;
-					case special_mode::vec4: result.emplace_back("0");
-					case special_mode::vec3: result.emplace_back("0");
-					case special_mode::vec2: result.emplace_back("0");
-						result.emplace_back("0");
 						return true;
 					case special_mode::boolean: result.emplace_back("false");
 						return true;
@@ -1148,7 +1300,7 @@ namespace utils
 				}
 				case special_mode::exists:
 				{
-					result.push_back(substr_from < data_size && substr_from < substr_to ? "1" : "0");
+					result.emplace_back(substr_from < data_size && substr_from < substr_to ? "1" : "0");
 					break;
 				}
 				case special_mode::number:
@@ -1158,7 +1310,7 @@ namespace utils
 				}
 				case special_mode::boolean:
 				{
-					result.push_back(v->as<bool>(substr_from) ? "true" : "false");
+					result.emplace_back(v->as<bool>(substr_from) ? "true" : "false");
 					break;
 				}
 				case special_mode::string:
@@ -1178,9 +1330,9 @@ namespace utils
 						{
 							result.push_back(v->data()[substr_from]);
 						}
-						else
+						else if (dest.params->lua_params->error_handler)
 						{
-							dest.params->error_handler->on_warning(dest.params->file, ("Expected item with at least " + std::to_string(index + 1) + " values, got "
+							dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Expected item with at least " + std::to_string(index + 1) + " values, got "
 								+ std::to_string(count) + ", variable " + name).c_str());
 							result.emplace_back("0");
 						}
@@ -1202,17 +1354,18 @@ namespace utils
 						{
 							result.push_back(v->data()[j]);
 						}
-						else
+						else if (dest.params->lua_params->error_handler)
 						{
 							result.push_back("0");
-							dest.params->error_handler->on_warning(dest.params->file, ("Number expected, instead got '" + v->data()[j] + "', variable: " + name).c_str());
+							dest.params->lua_params->error_handler->on_warning(dest.params->file,
+								("Number expected, instead got '" + v->data()[j] + "', variable: " + name).c_str());
 						}
 						if (result.size() >= size_t(vec_size)) break;
 					}
 
-					if (result.size() != 1 && count != vec_size)
+					if (result.size() != 1 && count != vec_size && dest.params->lua_params->error_handler)
 					{
-						dest.params->error_handler->on_warning(dest.params->file, ("Expected item with " + std::to_string(vec_size) + " values, got "
+						dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Expected item with " + std::to_string(vec_size) + " values, got "
 							+ std::to_string(count) + ", variable " + name).c_str());
 					}
 
@@ -1250,9 +1403,9 @@ namespace utils
 			{
 				dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
 			}
-			else if (dest.params->error_handler && (name.empty() || !isdigit(name[0])) && !is_required)
+			else if (dest.params->lua_params->error_handler && (name.empty() || !isdigit(name[0])) && !is_required)
 			{
-				dest.params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
+				dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
 			}
 		}
 
@@ -1379,9 +1532,9 @@ namespace utils
 				{
 					dest.add(wrap_special(SPECIAL_MISSING_VARIABLE, name));
 				}
-				if (!with_fallback && dest.params->error_handler && !is_required)
+				if (!with_fallback && dest.params->lua_params->error_handler && !is_required)
 				{
-					dest.params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
+					dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
 				}
 				return;
 			}
@@ -1496,9 +1649,9 @@ namespace utils
 			else if (equals(piece, "str") || equals(piece, "string")) mode = variable_info::special_mode::string;
 			if (equals(piece, "required") || equals(piece, "?")) is_required = true;
 		}
-		if (from == 0)
+		if (from == 0 && dest.params->lua_params->error_handler)
 		{
-			dest.params->error_handler->on_error(dest.params->file, ("Indices start with 1: " + pieces[0] + ", got: '" + s + "'").c_str());
+			dest.params->lua_params->error_handler->on_error(dest.params->file, ("Indices start with 1: " + pieces[0] + ", got: '" + s + "'").c_str());
 		}
 		if (from > 0) from--;
 		if (to > 0) to--;
@@ -1545,7 +1698,7 @@ namespace utils
 				return;
 			}
 
-			const auto expr_mode = value.find(SPECIAL_CALCULATE) == 0;
+			const auto expr_mode = starts_with(value, SPECIAL_CALCULATE_STR);
 
 			{
 				// Concatenation with ${VariableName}
@@ -1671,10 +1824,6 @@ namespace utils
 		void terminate() { terminated = true; }
 	};
 
-	using section_named = std::pair<std::string, creating_section>;
-	using sections_list = std::vector<section_named>;
-	using sections_map = std::unordered_map<std::string, resulting_section>;
-
 	struct ini_parser_data
 	{
 		sections_list sections;
@@ -1708,25 +1857,25 @@ namespace utils
 		template <typename... Args>
 		void warn(const char* format, const Args& ... args) const
 		{
-			if (!current_params.error_handler) return;
+			if (!current_params.lua_params->error_handler) return;
 			const int size = std::snprintf(nullptr, 0, format, warn_unwrap(args)...) + 1; // Extra space for '\0'
 			const std::unique_ptr<char[]> buf(new char[ size ]);
 			std::snprintf(buf.get(), size, format, warn_unwrap(args)...);
-			current_params.error_handler->on_warning(current_params.file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
+			current_params.lua_params->error_handler->on_warning(current_params.file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
 		}
 
 		template <typename... Args>
 		void error(const char* format, const Args& ... args) const
 		{
-			if (!current_params.error_handler) return;
+			if (!current_params.lua_params->error_handler) return;
 			const int size = std::snprintf(nullptr, 0, format, warn_unwrap(args)...) + 1; // Extra space for '\0'
 			const std::unique_ptr<char[]> buf(new char[ size ]);
 			std::snprintf(buf.get(), size, format, warn_unwrap(args)...);
-			current_params.error_handler->on_error(current_params.file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
+			current_params.lua_params->error_handler->on_error(current_params.file, std::string(buf.get(), buf.get() + size - 1).c_str()); // We don't want the '\0' inside
 		}
 
 		ini_parser_data(bool allow_includes = false, std::vector<path> resolve_within = {})
-			: resolve_within(std::move(resolve_within))
+			: resolve_within(std::move(resolve_within)), current_params(&sections)
 		{
 			current_params.allow_includes = allow_includes;
 		}
@@ -1788,7 +1937,7 @@ namespace utils
 			return {};
 		}
 
-		value_finalizer get_value_finalizer(const std::string& key, bool& include_value, variant& dest) const
+		value_finalizer get_value_finalizer(const std::string& key, bool& include_value, variant& dest)
 		{
 			return {key, include_value, dest, &current_params, true};
 		}
@@ -1804,7 +1953,7 @@ namespace utils
 		}
 
 		bool substitute_variable_array(const std::string& key, const variant& v, const std::shared_ptr<variable_scope>& sc,
-			std::vector<std::string>* referenced_variables, variant& result) const
+			std::vector<std::string>* referenced_variables, variant& result)
 		{
 			auto include_value_ret = true;
 			for (const auto& piece : v)
@@ -1822,7 +1971,7 @@ namespace utils
 		}
 
 		bool split_and_substitute(const std::string& key, current_section_info* c, const str_view& value, const std::shared_ptr<variable_scope>& sc,
-			std::vector<std::string>* referenced_variables, variant& result) const
+			std::vector<std::string>* referenced_variables, variant& result)
 		{
 			const auto split = split_string_quotes(value, !key.empty() && key[0] == '@');
 			if (delayed_substitute(c))
@@ -1834,10 +1983,13 @@ namespace utils
 			return substitute_variable_array(key, split, sc, referenced_variables ? referenced_variables : c ? &c->referenced_variables : nullptr, result);
 		}
 
+
 		void resolve_generator_impl(const std::shared_ptr<section_template>& t, const std::string& key, const std::string& section_key,
 			const std::shared_ptr<section_template>& tpl, const std::shared_ptr<variable_scope>& scope, std::vector<std::string>& referenced_variables)
 		{
-			current_section_info generated(section_key, {tpl});
+			current_section_info generated(section_key, {});
+			add_template(generated.referenced_templates, tpl);
+
 			auto gen_scope = scope;
 			auto gen_param_prefix = key + ":";
 			if (t)
@@ -1893,7 +2045,7 @@ namespace utils
 		}
 
 		void set_inline_values(std::shared_ptr<variable_scope>& scope_own, const std::shared_ptr<variable_scope>& scope,
-			const variant& trigger, const int index, std::vector<std::string>& referenced_variables) const
+			const variant& trigger, const int index, std::vector<std::string>& referenced_variables)
 		{
 			for (auto i = index; i < int(trigger.data().size()); i++)
 			{
@@ -2047,8 +2199,9 @@ namespace utils
 				else if (!is_virtual)
 				{
 					auto key = v.first;
-					if (key.find("${") != std::string::npos || key.find("$\"") != std::string::npos
-						|| key.find(SPECIAL_CALCULATE) != std::string::npos)
+					const auto index = key.find_first_of('$');
+					if (index != std::string::npos && (key[index + 1] == '{' || key[index + 1] == '"')
+						|| contains(key, SPECIAL_CALCULATE_STR))
 					{
 						variant key_v;
 						if (!substitute_variable_array(key, key, sc, &referenced_variables, key_v))
@@ -2119,21 +2272,54 @@ namespace utils
 				}
 			}
 
+			if (!c.target_section.empty())
+			{
+				const auto key_active = c.target_section.find("ACTIVE");
+				if (key_active != c.target_section.end())
+				{
+					auto flag = key_active->second.as<bool>();
+					if (contains(key_active->second.as<std::string>(), SPECIAL_CALCULATE_STR))
+					{
+						variant values;
+						if (substitute_variable_array(key_active->first, key_active->second, scope, referenced_variables_ptr, values))
+						{
+							flag = values.as<bool>();
+						}
+						else
+						{
+							flag = false;
+						}
+					}
+
+					if (!flag)
+					{
+						c.target_section = {};
+						c.target_section.set("ACTIVE", "0");
+						if (!equals(c.section_key, "FUNCTION")
+							&& !equals(c.section_key, "USE")
+							&& !equals(c.section_key, "INCLUDE"))
+						{
+							sections.push_back({c.section_key, c.target_section});
+						}
+						return;
+					}
+				}
+			}
+
 			if (equals(c.section_key, "FUNCTION") && current_params.allow_lua)
 			{
 				lua_register_function(
 					c.target_section.get("NAME").as<std::string>(),
 					c.target_section.get("ARGUMENTS"),
 					c.target_section.get("CODE").as<std::string>(),
-					!c.target_section.get("PRIVATE").as<bool>(),
-					current_params.file, current_params.error_handler);
+					current_params.file, *current_params.lua_params);
 				c.target_section.clear();
 			}
 			else if (equals(c.section_key, "USE") && current_params.allow_lua)
 			{
 				const auto name = c.target_section.get("FILE").as<std::string>();
 				const auto referenced = find_referenced(name, 0);
-				if (exists(referenced)) lua_import(referenced, !c.target_section.get("PRIVATE").as<bool>(), current_params.file, current_params.error_handler);
+				if (exists(referenced)) lua_import(referenced, current_params.file, *current_params.lua_params);
 				else error("Referenced file is missing: %s", name);
 				c.target_section.clear();
 			}
@@ -2152,31 +2338,26 @@ namespace utils
 						else include_scope->include_params.set(p.first, p.second);
 					}
 
-					// It’s important to copy values and clear section before parsing included files: those
-					// files might have their own includes, overwriting this one and breaking c.target_section pointer 
-					auto values = to_include->second.data();
-					c.target_section.clear();
-
-					const auto vars_fp = include_scope->include_params.fingerprint();
-					for (auto& i : values)
+					variant values;
+					if (substitute_variable_array(to_include->first, to_include->second, scope, referenced_variables_ptr, values))
 					{
-						parse_file(find_referenced(i, vars_fp), include_scope, vars_fp);
-					}
+						// It’s important to copy values and clear section before parsing included files: those
+						// files might have their own includes, overwriting this one and breaking c.target_section pointer 
+						c.target_section.clear();
 
-					current_params.file = previous_file;
+						const auto vars_fp = include_scope->include_params.fingerprint();
+						for (auto& i : values.data())
+						{
+							parse_file(find_referenced(i, vars_fp), include_scope, vars_fp);
+						}
+						current_params.file = previous_file;
+					}
 					return;
 				}
 			}
 
 			if (!c.target_section.empty())
 			{
-				const auto key_active = c.target_section.find("ACTIVE");
-				if (key_active != c.target_section.end() && !key_active->second.as<bool>())
-				{
-					c.target_section = {};
-					c.target_section.set("ACTIVE", "0");
-				}
-
 				sections.push_back({c.section_key, c.target_section});
 			}
 		}
@@ -2190,7 +2371,7 @@ namespace utils
 				result.data().push_back(str.str());
 				return result;
 			}
-			
+
 			auto last_nonspace = 0;
 			auto q = -1;
 			auto u = false, w = false;
@@ -2236,8 +2417,13 @@ namespace utils
 
 						if (rewind)
 						{
-							item = c + item + c;
-							if (u) item = "$" + item;
+							std::string s;
+							s.reserve(item.size() + (u ? 3 : 2));
+							if (u) s.push_back('$');
+							s.push_back(c);
+							s += item;
+							s.push_back(c);
+							item.swap(s);
 						}
 						else if (u)
 						{
@@ -2281,13 +2467,6 @@ namespace utils
 			}
 			result.data().push_back(item);
 			return result;
-		}
-
-		std::string convert_key_autoinc(const std::string& key)
-		{
-			std::string group_us;
-			return is_sequential(key, group_us)
-				? group_us + SPECIAL_KEY_AUTOINCREMENT + std::to_string(key_autoinc_index++) : key;
 		}
 
 		void parse_ini_finish(current_section_info& c, const std::string& data, const int non_space, str_view& key_view,
@@ -2369,11 +2548,18 @@ namespace utils
 			}
 		}
 
-		static bool is_sequential(const std::string& s, std::string& group_with_underscore)
+		std::string convert_key_autoinc(const std::string& key)
+		{
+			str_view group_us;
+			return is_sequential(key, group_us)
+				? group_us.str() + SPECIAL_KEY_AUTOINCREMENT + std::to_string(key_autoinc_index++) : key;
+		}
+
+		static bool is_sequential(const std::string& s, str_view& group_with_underscore)
 		{
 			if (ends_with(s, "_...") || ends_with(s, u8"_…") /* how lucky they are the same size lol */)
 			{
-				group_with_underscore = s.substr(0, s.size() - 3);
+				group_with_underscore = {s, 0U, uint32_t(s.size()) - 3U};
 				return true;
 			}
 			return false;
@@ -2542,7 +2728,7 @@ namespace utils
 				section_names_str.push_back(cs_key.str());
 				section_names_inv[section_names.size() - section_names_str.size()] = &*section_names_str.rbegin();
 			}
-			
+
 			for (const auto& section_name : section_names_inv)
 			{
 				auto found_template = templates_map.find(*section_name);
@@ -2562,7 +2748,7 @@ namespace utils
 			{
 				cs.push_back(std::make_unique<current_section_info>(std::move(cs_key)));
 			}
-		} 
+		}
 
 		static bool is_quote_working(const char* data, const int from, const int to, const bool allow_$ = true)
 		{
@@ -2661,7 +2847,7 @@ namespace utils
 			mark_processed(path.filename().string(), vars_fingerprint);
 			current_params.file = path;
 			const auto data = reader->read(path);
-			if (data.empty() && current_params.error_handler)
+			if (data.empty() && current_params.lua_params->error_handler)
 			{
 				warn("File is missing or empty: %s", path.string());
 			}
@@ -2671,12 +2857,12 @@ namespace utils
 		static resulting_section resolve_sequential_keys(creating_section& s)
 		{
 			resulting_section ret;
-			for (const auto& p : s.values)
+			for (auto& p : s.values)
 			{
 				const auto x = p.first.find(SPECIAL_KEY_AUTOINCREMENT);
 				if (x == std::string::npos)
 				{
-					ret[p.first] = p.second;
+					ret[p.first] = std::move(p.second);
 					continue;
 				}
 
@@ -2686,7 +2872,7 @@ namespace utils
 					auto cand = g + std::to_string(i);
 					if (ret.find(cand) == ret.end() && s.find(cand) == s.end())
 					{
-						ret[cand] = p.second;
+						ret[cand] = std::move(p.second);
 						break;
 					}
 				}
@@ -2694,41 +2880,85 @@ namespace utils
 			return ret;
 		}
 
-		void resolve_sequential()
+		void resolve_sequential_add(std::unordered_map<std::string, creating_section*>& temp_map, const std::string& key, creating_section& section) const
 		{
-			std::unordered_map<std::string, uint32_t> indices;
-			std::unordered_map<std::string, creating_section> temp_map;
-			for (const auto& p : sections)
+			auto existing = temp_map.find(key);
+			if (existing != temp_map.end())
 			{
-				auto key = p.first;
-				std::string group_us;
-				if (is_sequential(key, group_us))
+				for (auto& r : section.values)
 				{
-					auto& counter = indices[group_us];
-					key = group_us + std::to_string(counter++);
-					for (auto i = 0U; gen_find(sections, key) != sections.end() && i < SPECIAL_AUTOINCREMENT_LIMIT; i++)
-					{
-						key = group_us + std::to_string(counter++);
-					}
+					existing->second->set(r.first, std::move(r.second));
 				}
+			}
+			else
+			{
+				temp_map[key] = &section;
+			}
+		}
 
-				auto existing = temp_map.find(key);
-				if (existing != temp_map.end())
+		struct taken_indices
+		{
+			std::vector<uint32_t> taken_items;
+			uint32_t next_value = 0U;
+
+			uint32_t next()
+			{
+				auto ret = next_value++;
+				while (std::find(taken_items.begin(), taken_items.end(), ret) != taken_items.end())
 				{
-					for (auto& r : p.second.values)
-					{
-						existing->second.set(r.first, r.second);
-					}
+					ret = next_value++;
+				}
+				return ret;
+			}
+
+			void taken(uint32_t index)
+			{
+				if (index == next_value)
+				{
+					++next_value;
 				}
 				else
 				{
-					temp_map[key] = p.second;
+					taken_items.push_back(index);
+				}
+			}
+		};
+
+		void resolve_sequential()
+		{
+			std::unordered_map<size_t, taken_indices> indices;
+			std::unordered_map<std::string, creating_section*> temp_map;
+
+			for (auto& p : sections)
+			{
+				const auto& k = p.first;
+				if (k.size() < 3) continue;
+
+				auto digits = 0U;
+				while (isdigit(k[k.size() - digits - 1]) && digits < k.size() - 2) ++digits;
+
+				if (digits > 0 && k[k.size() - digits - 1] == '_')
+				{
+					indices[str_view{k, 0, uint32_t(k.size()) - digits}.hash_code_u32()].taken(uint32_t(std::strtoul(&k[k.size() - digits], nullptr, 10)));
+				}
+			}
+
+			for (auto& p : sections)
+			{
+				str_view group_us;
+				if (is_sequential(p.first, group_us))
+				{
+					resolve_sequential_add(temp_map, group_us.str() + std::to_string(indices[group_us.hash_code_u32()].next()), p.second);
+				}
+				else
+				{
+					resolve_sequential_add(temp_map, p.first, p.second);
 				}
 			}
 
 			for (auto& p : temp_map)
 			{
-				sections_map[p.first] = resolve_sequential_keys(p.second);
+				sections_map[p.first] = resolve_sequential_keys(*p.second);
 			}
 		}
 	};
@@ -2743,57 +2973,45 @@ namespace utils
 		delete data_;
 	}
 
-	const ini_parser& ini_parser::allow_lua(const bool value) const
+	ini_parser& ini_parser::set_reader(ini_parser_reader* reader)
+	{
+		data_->reader = reader;
+		return *this;
+	}
+
+	ini_parser& ini_parser::set_error_handler(ini_parser_error_handler* handler)
+	{
+		data_->current_params.lua_params->error_handler = handler;
+		return *this;
+	}
+
+	ini_parser& ini_parser::set_data_provider(ini_parser_data_provider* data_provider)
+	{
+		data_->current_params.lua_params->data_provider = data_provider;
+		return *this;
+	}
+
+	ini_parser& ini_parser::allow_lua(const bool value)
 	{
 		data_->current_params.allow_lua = value;
 		return *this;
 	}
 
-	const ini_parser& ini_parser::parse(const char* data, const int data_size, ini_parser_error_handler& error_handler) const
+	const ini_parser& ini_parser::parse(const char* data, const int data_size) const
 	{
-		data_->current_params.error_handler = &error_handler;
 		data_->parse_ini_values(std::string(data, data_size), {nullptr});
-		data_->current_params.error_handler = {};
 		return *this;
 	}
 
-	const ini_parser& ini_parser::parse(const std::string& data, ini_parser_error_handler& error_handler) const
+	const ini_parser& ini_parser::parse(const std::string& data) const
 	{
-		data_->current_params.error_handler = &error_handler;
 		data_->parse_ini_values(data, {nullptr});
-		data_->reader = {};
-		data_->current_params.error_handler = {};
 		return *this;
 	}
 
-	const ini_parser& ini_parser::parse(const char* data, const int data_size, const ini_parser_reader& reader,
-		ini_parser_error_handler& error_handler) const
+	const ini_parser& ini_parser::parse_file(const path& path) const
 	{
-		data_->reader = &reader;
-		data_->current_params.error_handler = &error_handler;
-		data_->parse_ini_values(std::string(data, data_size), {nullptr});
-		data_->reader = {};
-		data_->current_params.error_handler = {};
-		return *this;
-	}
-
-	const ini_parser& ini_parser::parse(const std::string& data, const ini_parser_reader& reader, ini_parser_error_handler& error_handler) const
-	{
-		data_->reader = &reader;
-		data_->current_params.error_handler = &error_handler;
-		data_->parse_ini_values(data, {nullptr});
-		data_->reader = {};
-		data_->current_params.error_handler = {};
-		return *this;
-	}
-
-	const ini_parser& ini_parser::parse_file(const path& path, const ini_parser_reader& reader, ini_parser_error_handler& error_handler) const
-	{
-		data_->reader = &reader;
-		data_->current_params.error_handler = &error_handler;
 		data_->parse_file(path, {nullptr}, 0);
-		data_->reader = {};
-		data_->current_params.error_handler = {};
 		return *this;
 	}
 
@@ -2807,11 +3025,6 @@ namespace utils
 	void ini_parser::finalize_end() const
 	{
 		data_->resolve_sequential();
-		if (data_->current_params.allow_lua && lua_state.ptr && (!lua_state.is_clean || lua_state.used > 40))
-		{
-			lua_close(lua_state.ptr);
-			lua_state.ptr = nullptr;
-		}
 	}
 
 	template <typename T>

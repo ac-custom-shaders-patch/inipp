@@ -22,9 +22,8 @@ namespace utils
 {
 	enum class special_folder : unsigned;
 
-	class path
+	struct path
 	{
-	public:
 		path() {}
 		path(const char* data) : data_(data) {}
 		path(const wchar_t* data) : data_(utf16_to_utf8(data)) {}
@@ -66,6 +65,7 @@ namespace utils
 		std::string extension() const;
 		bool extension_matches(const std::vector<std::string>& extensions) const;
 		path replace_extension(const std::string& extension) const;
+		bool is_child_of(const path& parent) const;
 		path operator/(const path& more) const;
 		path operator+(char c) const { return data_ + c; }
 		path operator+(const path& more) const { return data_ + more.data_; }
@@ -83,7 +83,7 @@ namespace utils
 	path get_module_path(void* handle);
 
 	void set_special_folders_path(const path& ac_root);
-	path get_special_folder_path(special_folder id);
+	const path& get_special_folder_path(special_folder id);
 
 	#ifndef USE_SIMPLE
 	path scan_dir(const path& dir, const char* mask,
@@ -94,7 +94,7 @@ namespace utils
 	std::vector<path> list_files(const path& path_val, const char* mask = "*", bool recursive = false);
 
 	bool try_read_file(const path& filename, blob& result);
-	void write_file(const path& filename, const blob& data);
+	void write_file(const path& filename, const blob_view& data);
 
 	blob read_file(const path& filename);
 	#endif

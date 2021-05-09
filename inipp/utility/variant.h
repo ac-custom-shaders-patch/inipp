@@ -117,7 +117,7 @@ namespace utils
 		uint32_t as(size_t i) const { return uint32_t(as_uint64_t(i)); }
 
 		template <>
-		long as(size_t i) const { return long(as_uint64_t(i)); }
+		long as(size_t i) const { return long(as_int64_t(i)); }
 
 		template <>
 		unsigned long as(size_t i) const { return unsigned long(as_uint64_t(i)); }
