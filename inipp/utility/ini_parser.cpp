@@ -183,12 +183,23 @@ namespace utils
 		return c == '_' || isupper(c) || islower(c) || isdigit(c);
 	}
 
-	static bool is_identifier(const std::string& s, bool allow_leading_zero = true)
+	inline bool is_identifier(const std::string& s, bool allow_leading_zero = true)
 	{
 		if (s.empty() || !allow_leading_zero && isdigit(s[0])) return false;
 		for (auto i : s)
 		{
 			if (!is_identifier_part(i)) return false;
+		}
+		return true;
+	}
+
+	inline bool is_identifier(const str_view& s, bool allow_leading_zero = true)
+	{
+		const auto l = s.size();
+		if (l == 0 || !allow_leading_zero && isdigit(s[0])) return false;
+		for (auto b = &s[0], e = &s[l - 1]; b != e; ++b)
+		{
+			if (!is_identifier_part(*b)) return false;
 		}
 		return true;
 	}
@@ -1589,27 +1600,19 @@ namespace utils
 		}
 	};
 
-	static int stoi(const std::string& s, int default_value, bool* set_ptr = nullptr)
+	inline int stoi(const str_view& s, int default_value, bool* set_ptr = nullptr)
 	{
-		try
-		{
-			if (s.empty() || !isdigit(s[0]) && s[0] != '-')
-			{
-				if (set_ptr) *set_ptr = false;
-				return default_value;
-			}
-			const auto ret = std::stoi(s);
-			if (set_ptr) *set_ptr = true;
-			return ret;
-		}
-		catch (std::exception&)
+		const auto c = s.empty() ? "" : s.data();
+		if (!isinteger(c[0]))
 		{
 			if (set_ptr) *set_ptr = false;
 			return default_value;
-		}
+		}		
+		if (set_ptr) *set_ptr = true;
+		return ishex(c) ? int(std::strtoull(c + 2, nullptr, 16)) : int(std::stoll(c, nullptr, 10));
 	}
 
-	static int stoi(const std::vector<std::string>& v, int index, int default_value, bool* set_ptr = nullptr)
+	inline int stoi(const std::vector<str_view>& v, int index, int default_value, bool* set_ptr = nullptr)
 	{
 		if (index < 0 || index >= int(v.size()))
 		{
@@ -1619,9 +1622,9 @@ namespace utils
 		return stoi(v[index], default_value, set_ptr);
 	}
 
-	static variable_info get_parametrized_variable_info(const std::string& s, const value_finalizer& dest)
+	static variable_info get_parametrized_variable_info(const str_view& s, const value_finalizer& dest)
 	{
-		const auto pieces = split_string(s, ":", false, true);
+		const auto pieces = s.split(':', false, true);
 		const auto size = pieces.size();
 		if (size == 0 || size > 5 || !is_identifier(pieces[0])) return {};
 		bool from_set;
@@ -1634,28 +1637,28 @@ namespace utils
 		{
 			const auto& piece = pieces[i];
 			if (piece.empty() || !islower(piece[0]) && piece[0] != '?') continue;
-			if (equals(piece, "size") || equals(piece, "count")) mode = variable_info::special_mode::size;
-			else if (equals(piece, "length")) mode = variable_info::special_mode::length;
-			else if (equals(piece, "exists")) mode = variable_info::special_mode::exists;
-			else if (equals(piece, "vec2")) mode = variable_info::special_mode::vec2;
-			else if (equals(piece, "vec3")) mode = variable_info::special_mode::vec3;
-			else if (equals(piece, "vec4")) mode = variable_info::special_mode::vec4;
-			else if (equals(piece, "x")) mode = variable_info::special_mode::x;
-			else if (equals(piece, "y")) mode = variable_info::special_mode::y;
-			else if (equals(piece, "z")) mode = variable_info::special_mode::z;
-			else if (equals(piece, "w")) mode = variable_info::special_mode::w;
-			else if (equals(piece, "num") || equals(piece, "number")) mode = variable_info::special_mode::number;
-			else if (equals(piece, "bool") || equals(piece, "boolean")) mode = variable_info::special_mode::boolean;
-			else if (equals(piece, "str") || equals(piece, "string")) mode = variable_info::special_mode::string;
-			if (equals(piece, "required") || equals(piece, "?")) is_required = true;
+			if (piece == "size" || piece == "count") mode = variable_info::special_mode::size;
+			else if (piece == "length") mode = variable_info::special_mode::length;
+			else if (piece == "exists") mode = variable_info::special_mode::exists;
+			else if (piece == "vec2") mode = variable_info::special_mode::vec2;
+			else if (piece == "vec3") mode = variable_info::special_mode::vec3;
+			else if (piece == "vec4") mode = variable_info::special_mode::vec4;
+			else if (piece == "x") mode = variable_info::special_mode::x;
+			else if (piece == "y") mode = variable_info::special_mode::y;
+			else if (piece == "z") mode = variable_info::special_mode::z;
+			else if (piece == "w") mode = variable_info::special_mode::w;
+			else if (piece == "num" || piece == "number") mode = variable_info::special_mode::number;
+			else if (piece == "bool" || piece == "boolean") mode = variable_info::special_mode::boolean;
+			else if (piece == "str" || piece == "string") mode = variable_info::special_mode::string;
+			if (piece == "required" || piece == "?") is_required = true;
 		}
 		if (from == 0 && dest.params->lua_params->error_handler)
 		{
-			dest.params->lua_params->error_handler->on_error(dest.params->file, ("Indices start with 1: " + pieces[0] + ", got: '" + s + "'").c_str());
+			dest.params->lua_params->error_handler->on_error(dest.params->file, ("Indices start with 1: " + pieces[0].str() + ", got: '" + s.str() + "'").c_str());
 		}
 		if (from > 0) from--;
 		if (to > 0) to--;
-		return {pieces[0], from, to, mode, is_required};
+		return {pieces[0].str(), from, to, mode, is_required};
 	}
 
 	static variable_info check_variable(const std::string& s, const value_finalizer& dest)
@@ -1664,7 +1667,7 @@ namespace utils
 		if (s[0] != '$') return {};
 		if (s[1] == '{' && s[s.size() - 1] == '}')
 		{
-			return get_parametrized_variable_info(s.substr(2, s.size() - 3), dest);
+			return get_parametrized_variable_info(str_view(s).substr(2, s.size() - 3), dest);
 		}
 		const auto vname = s.substr(1);
 		if (!is_identifier(vname)) return {};
