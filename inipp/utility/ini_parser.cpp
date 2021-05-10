@@ -52,7 +52,7 @@ namespace utils
 			values[k] = std::move(v);
 		}
 
-		void set(const std::string& k, str_view v)
+		void set(const std::string& k, const str_view& v)
 		{
 			values[k] = v.str(); // TODO
 		}
@@ -355,9 +355,19 @@ namespace utils
 	static const std::string SPECIAL_CALCULATE = SPECIAL_CALCULATE_STR;
 	static const std::string SPECIAL_END = SPECIAL_END_STR;
 
-	std::string wrap_special(const std::string& special, const std::string& value)
+	inline std::string wrap_special(const std::string& special, const std::string& value)
 	{
 		return special + value + SPECIAL_END;
+	}
+
+	inline std::string wrap_special(const std::string& special, const str_view& value)
+	{
+		std::string ret;
+		ret.resize(special.size() + value.size() + SPECIAL_END.size());
+		memcpy(&ret[0], &special[0], special.size());
+		memcpy(&ret[special.size()], &value[0], value.size());
+		memcpy(&ret[special.size() + value.size()], &SPECIAL_END[0], SPECIAL_END.size());
+		return ret;
 	}
 
 	static void lua_parse(lua_State* L, int index, variant& dest, const std::string& prefix, const std::string& postfix)
@@ -892,7 +902,7 @@ namespace utils
 		script_params& operator=(const script_params& other) = delete;
 	};
 
-	static void lua_calculate(const std::string& key, bool& include_value, variant& dest, const std::string& expr,
+	static void lua_calculate(const str_view& key, bool& include_value, variant& dest, const std::string& expr,
 		const std::string& prefix, const std::string& postfix,
 		const path& file, ini_parser_lua_params& lua_params)
 	{
@@ -942,7 +952,7 @@ namespace utils
 				include_value = false;
 				return;
 			}
-			if (lua_params.error_handler) lua_params.error_handler->on_error(file, (error_msg + "\nKey: " + key + "\nCommand: " + expr).c_str());
+			if (lua_params.error_handler) lua_params.error_handler->on_error(file, (error_msg + "\nKey: " + key.str() + "\nCommand: " + expr).c_str());
 			if (!prefix.empty() || !postfix.empty()) dest.data().push_back(prefix + postfix);
 			return;
 		}
@@ -1109,14 +1119,14 @@ namespace utils
 
 	struct value_finalizer
 	{
-		std::string key;
+		str_view key;
 		variant& dest;
 		script_params* params;
 		bool& include_value;
 		bool process_values;
 
-		value_finalizer(std::string key, bool& include_value, variant& dest, script_params* params, bool process_values = true)
-			: key(std::move(key)), dest(dest), params(params), include_value(include_value), process_values(process_values) { }
+		value_finalizer(const str_view& key, bool& include_value, variant& dest, script_params* params, bool process_values = true)
+			: key(key), dest(dest), params(params), include_value(include_value), process_values(process_values) { }
 
 		void calculate(const std::string& expr, const std::string& prefix, const std::string& postfix) const
 		{
@@ -1234,7 +1244,7 @@ namespace utils
 			}
 		}
 
-		std::string name;
+		str_view name;
 		str_view default_value;
 		int substr_from = 0;
 		int substr_to = std::numeric_limits<int>::max();
@@ -1244,14 +1254,14 @@ namespace utils
 
 		variable_info() : with_fallback(false), is_required(false) {}
 
-		explicit variable_info(std::string name) : name(std::move(name)), with_fallback(true), is_required(false) {}
+		explicit variable_info(const str_view& name) : name(name), with_fallback(true), is_required(false) {}
 
-		variable_info(std::string name, str_view default_value, const int from, const int to, const special_mode mode, const bool is_required)
-			: name(std::move(name)), default_value(default_value), substr_from(from), substr_to(to), with_fallback(false), is_required(is_required), mode(mode) {}
+		variable_info(const str_view& name, const str_view& default_value, const int from, const int to, const special_mode mode, const bool is_required)
+			: name(name), default_value(default_value), substr_from(from), substr_to(to), with_fallback(false), is_required(is_required), mode(mode) {}
 
 		bool get_values(const std::shared_ptr<variable_scope>& include_vars, std::vector<std::string>& result, bool& include_value, const value_finalizer& dest)
 		{
-			const auto v = include_vars->find(name);
+			const auto v = include_vars->find(name.str() /* TODO */);
 			if (!v)
 			{
 				if (is_required)
@@ -1351,7 +1361,7 @@ namespace utils
 						else if (dest.params->lua_params->error_handler)
 						{
 							dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Expected item with at least " + std::to_string(index + 1) + " values, got "
-								+ std::to_string(count) + ", variable " + name).c_str());
+								+ std::to_string(count) + ", variable " + name.str()).c_str());
 							result.emplace_back("0");
 						}
 					}
@@ -1376,7 +1386,7 @@ namespace utils
 						{
 							result.push_back("0");
 							dest.params->lua_params->error_handler->on_warning(dest.params->file,
-								("Number expected, instead got '" + v->data()[j] + "', variable: " + name).c_str());
+								("Number expected, instead got '" + v->data()[j] + "', variable: " + name.str()).c_str());
 						}
 						if (result.size() >= size_t(vec_size)) break;
 					}
@@ -1384,7 +1394,7 @@ namespace utils
 					if (result.size() != 1 && count != vec_size && dest.params->lua_params->error_handler)
 					{
 						dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Expected item with " + std::to_string(vec_size) + " values, got "
-							+ std::to_string(count) + ", variable " + name).c_str());
+							+ std::to_string(count) + ", variable " + name.str()).c_str());
 					}
 
 					const auto fill_with = result.size() == 1 ? result[0] : "0";
@@ -1423,7 +1433,7 @@ namespace utils
 			}
 			else if (dest.params->lua_params->error_handler && (name.empty() || !isdigit(name[0])) && !is_required)
 			{
-				dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
+				dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name.str()).c_str());
 			}
 		}
 
@@ -1552,7 +1562,7 @@ namespace utils
 				}
 				if (!with_fallback && dest.params->lua_params->error_handler && !is_required)
 				{
-					dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name).c_str());
+					dest.params->lua_params->error_handler->on_warning(dest.params->file, ("Missing variable: " + name.str()).c_str());
 				}
 				return;
 			}
@@ -1667,7 +1677,7 @@ namespace utils
 		}
 		if (from > 0) from--;
 		if (to > 0) to--;
-		return {pieces[0].str(), default_value, from, to, mode, is_required};
+		return {pieces[0], default_value, from, to, mode, is_required};
 	}
 
 	static variable_info check_variable(const str_view& s, const value_finalizer& dest)
@@ -1680,7 +1690,7 @@ namespace utils
 		}
 		const auto vname = s.substr(1U);
 		if (!is_identifier(vname)) return {};
-		return variable_info{vname.str()};
+		return variable_info{vname};
 	}
 
 	static void substitute_variable(const str_view& value, const std::shared_ptr<variable_scope>& include_vars, bool& include_value, const value_finalizer& dest,
@@ -1696,7 +1706,7 @@ namespace utils
 		if (stack < 100)
 		{
 			auto var = check_variable(value, dest);
-			if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
+			if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name.str());
 			if (!var.name.empty())
 			{
 				// Either $VariableName or ${VariableName}
@@ -1719,7 +1729,7 @@ namespace utils
 				if (var_end != std::string::npos)
 				{
 					var = check_variable(value.substr(var_begin, var_end - var_begin + 1), dest);
-					if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
+					if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name.str());
 					variant temp;
 					const auto finalizer = value_finalizer{var.name, include_value, temp, dest.params, false};
 					var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end + 1), include_value, finalizer, expr_mode);
@@ -1745,7 +1755,7 @@ namespace utils
 					if (var_end != var_begin + 1)
 					{
 						var = check_variable(value.substr(var_begin, var_end - var_begin), dest);
-						if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name);
+						if (!var.name.empty() && referenced_variables) referenced_variables->push_back(var.name.str());
 						variant temp;
 						const auto finalizer = value_finalizer{var.name, include_value, temp, dest.params, false};
 						var.substitute(include_vars, value.substr(0, var_begin), value.substr(var_end), include_value, finalizer, expr_mode);
@@ -1949,7 +1959,7 @@ namespace utils
 			return {};
 		}
 
-		value_finalizer get_value_finalizer(const std::string& key, bool& include_value, variant& dest)
+		value_finalizer get_value_finalizer(const str_view& key, bool& include_value, variant& dest)
 		{
 			return {key, include_value, dest, &current_params, true};
 		}
@@ -1976,7 +1986,7 @@ namespace utils
 				}
 				else
 				{
-					substitute_variable(str_view(piece), sc, include_value_ret, get_value_finalizer(key, include_value_ret, result), 0, referenced_variables);
+					substitute_variable(str_view(piece), sc, include_value_ret, get_value_finalizer(str_view(key), include_value_ret, result), 0, referenced_variables);
 				}
 			}
 			return include_value_ret;
