@@ -1274,7 +1274,7 @@ namespace utils
 					result.emplace_back(default_value.str());
 					return true;
 				}
-				
+
 				switch (mode)
 				{
 					case special_mode::vec4: result.emplace_back("0"); // NOLINT(bugprone-branch-clone)
@@ -1779,6 +1779,7 @@ namespace utils
 		template_section values;
 		std::shared_ptr<variable_scope> template_scope;
 		std::vector<std::shared_ptr<section_template>> parents;
+		bool early_resolve{};
 
 		section_template(std::string name, const std::shared_ptr<variable_scope>& scope)
 			: name(std::move(name)), template_scope(scope->inherit())
@@ -1859,6 +1860,26 @@ namespace utils
 		script_params current_params;
 		const ini_parser_reader* reader{};
 		uint64_t key_autoinc_index{};
+
+		std::shared_ptr<section_template> get_or_create_template(const std::string& s, const std::shared_ptr<variable_scope>& scope)
+		{
+			const auto f = templates_map.find(s);
+			if (f == templates_map.end())
+			{
+				return templates_map[s] = std::make_shared<section_template>(s, scope);
+			}
+			return f->second;
+		}
+
+		std::shared_ptr<section_template> get_or_create_mixin(const std::string& s, const std::shared_ptr<variable_scope>& scope)
+		{
+			const auto f = mixins_map.find(s);
+			if (f == mixins_map.end())
+			{
+				return mixins_map[s] = std::make_shared<section_template>(s, scope);
+			}
+			return f->second;
+		}
 
 		bool get_template(const std::string& s, std::shared_ptr<section_template>& ref)
 		{
@@ -2004,7 +2025,6 @@ namespace utils
 
 			return substitute_variable_array(key, split, sc, referenced_variables ? referenced_variables : c ? &c->referenced_variables : nullptr, result);
 		}
-
 
 		void resolve_generator_impl(const std::shared_ptr<section_template>& t, const std::string& key, const std::string& section_key,
 			const std::shared_ptr<section_template>& tpl, const std::shared_ptr<variable_scope>& scope, std::vector<std::string>& referenced_variables)
@@ -2610,13 +2630,26 @@ namespace utils
 			status = {};
 		}
 
-		static void add_template(std::vector<std::shared_ptr<section_template>>& templates, const std::shared_ptr<section_template>& t)
+		static void add_template(std::vector<std::shared_ptr<section_template>>& late_templates,
+			const std::shared_ptr<section_template>& t)
 		{
-			templates.push_back(t);
+			late_templates.push_back(t);
 			for (const auto& p : t->parents)
 			{
 				// TODO: Recursion protection
-				add_template(templates, p);
+				add_template(late_templates, p);
+			}
+		}
+
+		static void add_template(std::vector<std::shared_ptr<section_template>>& early_templates, std::vector<std::shared_ptr<section_template>>& late_templates,
+			const std::shared_ptr<section_template>& t)
+		{
+			if (t->early_resolve) early_templates.push_back(t);
+			else late_templates.push_back(t);
+			for (const auto& p : t->parents)
+			{
+				// TODO: Recursion protection
+				add_template(early_templates, late_templates, p);
 			}
 		}
 
@@ -2669,78 +2702,48 @@ namespace utils
 				cs_keys = cs_keys.substr(uint32_t(separator + 1));
 			}
 
-			auto section_names = cs_keys.split(',', true, true);
-			if (section_names.empty()) section_names.emplace_back("");
-
 			if (is_template)
 			{
-				for (const auto& cs_key : section_names)
+				auto pieces = cs_keys.split(' ', true, true);
+				auto tpl = get_or_create_template(pieces[0].str(), scope);
+				if (pieces.size() > 1 && (pieces[pieces.size() - 1] == "earlyresolve" || pieces[pieces.size() - 1] == "EARLYRESOLVE"))
 				{
-					auto pieces = split_string(cs_key.str(), " ", true, true);
-					auto template_name = pieces[0];
-					if (templates_map.find(template_name) == templates_map.end())
-					{
-						templates_map[template_name] = std::make_unique<section_template>(template_name, scope);
-					}
-
-					if (pieces.size() > 2 && (equals(pieces[1], "extends") || equals(pieces[1], "EXTENDS")))
-					{
-						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
-						{
-							trim_self(pieces[k], ", \t\r");
-							const auto found = templates_map.find(pieces[k]);
-							if (found == templates_map.end())
-							{
-								templates_map[pieces[k]] = std::make_unique<section_template>(pieces[k], scope);
-								templates_map[template_name]->parents.push_back(templates_map[pieces[k]]);
-							}
-							else
-							{
-								templates_map[template_name]->parents.push_back(found->second);
-							}
-						}
-					}
-					cs.push_back(std::make_unique<current_section_info>(templates_map[template_name]));
+					tpl->early_resolve = true;
+					pieces.pop_back();
 				}
+				if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
+				{
+					for (auto k = 2U, kt = uint32_t(pieces.size()); k < kt; ++k)
+					{
+						pieces[k].trim(", \t\r");
+						tpl->parents.push_back(get_or_create_template(pieces[k].str(), scope));
+					}
+				}
+				cs.push_back(std::make_unique<current_section_info>(tpl));
 				return;
 			}
 
 			if (is_mixin)
 			{
-				for (const auto& cs_key : section_names)
+				auto pieces = cs_keys.split(' ', true, true);
+				auto tpl = get_or_create_mixin(pieces[0].str(), scope);					
+				if (pieces.size() > 2 && (pieces[1] == "extends" || pieces[1] == "EXTENDS"))
 				{
-					auto pieces = split_string(cs_key.str(), " ", true, true);
-
-					auto template_name = pieces[0];
-					if (mixins_map.find(template_name) == mixins_map.end())
+					for (auto k = 2U, kt = uint32_t(pieces.size()); k < kt; ++k)
 					{
-						mixins_map[template_name] = std::make_unique<section_template>(template_name, scope);
+						pieces[k].trim(", \t\r");
+						tpl->parents.push_back(get_or_create_mixin(pieces[k].str(), scope));
 					}
-
-					if (pieces.size() > 2 && (equals(pieces[1], "extends") || equals(pieces[1], "EXTENDS")))
-					{
-						for (auto k = 2, kt = int(pieces.size()); k < kt; k++)
-						{
-							trim_self(pieces[k], ", \t\r");
-							const auto found = mixins_map.find(pieces[k]);
-							if (found == mixins_map.end())
-							{
-								mixins_map[pieces[k]] = std::make_unique<section_template>(pieces[k], scope);
-								mixins_map[template_name]->parents.push_back(mixins_map[pieces[k]]);
-							}
-							else
-							{
-								mixins_map[template_name]->parents.push_back(found->second);
-							}
-						}
-					}
-					cs.push_back(std::make_unique<current_section_info>(mixins_map[template_name]));
 				}
+				cs.push_back(std::make_unique<current_section_info>(tpl));
 				return;
 			}
 
-			std::vector<std::shared_ptr<section_template>> referenced_templates;
+			auto section_names = cs_keys.split(',', true, true);
+			if (section_names.empty()) section_names.emplace_back("");
 
+			std::vector<std::shared_ptr<section_template>> referenced_early_templates;
+			std::vector<std::shared_ptr<section_template>> referenced_late_templates;
 			std::vector<std::string> section_names_str;
 			std::vector<std::string*> section_names_inv;
 			section_names_str.reserve(section_names.size());
@@ -2756,19 +2759,32 @@ namespace utils
 				auto found_template = templates_map.find(*section_name);
 				if (found_template != templates_map.end())
 				{
-					add_template(referenced_templates, found_template->second);
+					add_template(referenced_early_templates, referenced_late_templates, found_template->second);
 				}
 			}
 
-			if (!referenced_templates.empty())
+			if (!referenced_late_templates.empty())
 			{
-				cs.push_back(std::make_unique<current_section_info>(final_name, referenced_templates));
-				return;
+				cs.push_back(std::make_unique<current_section_info>(final_name, std::move(referenced_late_templates)));
+			}
+			else
+			{
+				for (auto& cs_key : section_names_str)
+				{
+					cs.push_back(std::make_unique<current_section_info>(std::move(cs_key)));
+				}
 			}
 
-			for (auto& cs_key : section_names_str)
+			if (!referenced_early_templates.empty())
 			{
-				cs.push_back(std::make_unique<current_section_info>(std::move(cs_key)));
+				for (auto& c : cs)
+				{
+					const auto sc = prepare_section_scope(*c, scope);
+					for (const auto& t : referenced_early_templates)
+					{
+						resolve_template(*c, sc, t, c->referenced_variables);
+					}
+				}
 			}
 		}
 
