@@ -2187,7 +2187,7 @@ namespace utils
 		}
 
 		void resolve_template(current_section_info& c, const std::shared_ptr<variable_scope>& scope, const std::shared_ptr<section_template>& t,
-			std::vector<std::string>& referenced_variables)
+			std::vector<std::string>& referenced_variables, bool within_template)
 		{
 			const auto sc = scope->inherit();
 			sc->fallback(t->template_scope);
@@ -2212,7 +2212,7 @@ namespace utils
 				const auto is_virtual = is_output || is_generator || is_mixin;
 
 				auto& set_via_template = c.set_via_template[t.get()];
-				if (!is_virtual && c.target_section.find(v.first) != c.target_section.end()
+				if (!is_virtual && within_template && c.target_section.find(v.first) != c.target_section.end()
 					&& std::find(set_via_template.begin(), set_via_template.end(), v.first) == set_via_template.end()
 					|| is_generator_param)
 				{
@@ -2236,7 +2236,7 @@ namespace utils
 				}
 				else if (is_mixin)
 				{
-					resolve_mixin(c, sc, dest);
+					resolve_mixin(c, sc, dest, within_template);
 				}
 				else if (!is_virtual)
 				{
@@ -2255,25 +2255,29 @@ namespace utils
 
 					key = convert_key_autoinc(key);
 					c.target_section.set(key, dest);
-					set_via_template.push_back(key);
+					if (within_template)
+					{
+						set_via_template.push_back(key);
+					}
 				}
 			}
 		}
 
-		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const std::string& mixin_name, const variant& trigger, int inline_values_index)
+		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const std::string& mixin_name, const variant& trigger, 
+			int inline_values_index, bool within_template)
 		{
 			std::shared_ptr<section_template> t;
 			if (!get_mixin(mixin_name, t)) return;
 
 			std::shared_ptr<variable_scope> scope_own;
 			set_inline_values(scope_own, sc, trigger, inline_values_index, c.referenced_variables);
-			resolve_template(c, scope_own ? scope_own : sc, t, c.referenced_variables);
+			resolve_template(c, scope_own ? scope_own : sc, t, c.referenced_variables, within_template);
 		}
 
-		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const variant& trigger)
+		void resolve_mixin(current_section_info& c, const std::shared_ptr<variable_scope>& sc, const variant& trigger, bool within_template)
 		{
 			if (trigger.empty()) return;
-			resolve_mixin(c, sc, trigger.data()[0], trigger, 1);
+			resolve_mixin(c, sc, trigger.data()[0], trigger, 1, within_template);
 		}
 
 		void parse_ini_section_finish(current_section_info& c, const std::shared_ptr<variable_scope>& scope,
@@ -2294,7 +2298,7 @@ namespace utils
 				const auto sc = prepare_section_scope(c, scope);
 				for (const auto& t : c.referenced_templates)
 				{
-					resolve_template(c, sc, t, referenced_variables);
+					resolve_template(c, sc, t, referenced_variables, true);
 				}
 
 				if (current_params.erase_referenced)
@@ -2554,7 +2558,7 @@ namespace utils
 			{
 				if (starts_with(key, "@MIXIN") || equals(key, "@"))
 				{
-					resolve_mixin(c, sc, splitted);
+					resolve_mixin(c, sc, splitted, false);
 				}
 				else if (starts_with(key, "@GENERATOR"))
 				{
@@ -2782,7 +2786,7 @@ namespace utils
 					const auto sc = prepare_section_scope(*c, scope);
 					for (const auto& t : referenced_early_templates)
 					{
-						resolve_template(*c, sc, t, c->referenced_variables);
+						resolve_template(*c, sc, t, c->referenced_variables, true);
 					}
 				}
 			}
