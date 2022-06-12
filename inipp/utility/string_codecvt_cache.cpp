@@ -10,7 +10,7 @@ namespace utils
 
 		if (conversion_utf16_)
 		{
-			auto s = utf8_to_utf16(input);
+			auto s = utf16(input);
 			conversion_utf16_(s);
 			return data1_[input] = s;
 		}
@@ -18,9 +18,9 @@ namespace utils
 		{
 			auto s = input;
 			conversion_utf8_(s);
-			return data1_[input] = utf8_to_utf16(s);
+			return data1_[input] = utf16(s);
 		}
-		return data1_[input] = utf8_to_utf16(input);
+		return data1_[input] = utf16(input);
 	}
 
 	const std::string& string_codecvt_cache::get(const std::wstring& input)
@@ -32,14 +32,14 @@ namespace utils
 		{
 			auto s = input;
 			conversion_utf16_(s);
-			return data2_[input] = utf16_to_utf8(s);
+			return data2_[input] = utf8(s);
 		}
 		if (conversion_utf8_)
 		{
-			auto s = utf16_to_utf8(input);
+			auto s = utf8(input);
 			conversion_utf8_(s);
 			return data2_[input] = s;
 		}
-		return data2_[input] = utf16_to_utf8(input);
+		return data2_[input] = utf8(input);
 	}
 }

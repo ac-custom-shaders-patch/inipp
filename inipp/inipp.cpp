@@ -3,11 +3,10 @@
 #include <utility/variant.h>
 #include <filesystem>
 #include <utility/json.h>
+#include <utility/robin_hood.h>
 #include <iomanip>
 
-#define NOMINMAX
 #include <cstdio>
-#include <windows.h>
 #include <rang.hpp>
 #pragma execution_character_set("utf-8")
 
@@ -40,10 +39,10 @@ static void show_usage(const std::string& name)
 		<< "If no files given, reads INIpp file from STDIN and prints flatten result\n"
 		<< "in STDOUT, looking for included files in current directory\n\n"
 		<< "Exit status:\n"
- 		<< " 0  if OK,\n"
- 		<< " 1  if there are any warnings,\n"
- 		<< " 2  if there are any parsing errors,\n"
- 		<< " 3  if serious trouble (e.g., parser threw an exception).\n\n"
+		<< " 0  if OK,\n"
+		<< " 1  if there are any warnings,\n"
+		<< " 2  if there are any parsing errors,\n"
+		<< " 3  if serious trouble (e.g., parser threw an exception).\n\n"
 		<< "Source code is available at: <https://github.com/ac-custom-shaders-patch/inipp>\n";
 }
 
@@ -56,8 +55,8 @@ static void show_version()
 		<< "There is NO WARRANTY, to the extent permitted by law.\n";
 }
 
-using section = std::unordered_map<std::string, utils::variant>;
-using ini_file = std::unordered_map<std::string, section>;
+using section = robin_hood::unordered_map<std::string, utils::variant>;
+using ini_file = robin_hood::unordered_map<std::string, section>;
 
 struct simple_reader : utils::ini_parser_reader
 {
@@ -71,7 +70,7 @@ struct simple_reader : utils::ini_parser_reader
 
 struct caching_reader : utils::ini_parser_reader
 {
-	std::unordered_map<std::wstring, std::string> cache;
+	robin_hood::unordered_map<std::wstring, std::string> cache;
 
 	std::string read(const utils::path& filename) const override
 	{
@@ -112,13 +111,22 @@ struct error_handler : utils::ini_parser_error_handler
 	}
 };
 
-static std::string serialize(const utils::ini_parser& parser, bool output_format, bool output_ini)
+static utils::ini_parser::serializer_params serialize_params()
 {
-	if (output_ini) return parser.to_ini();
-	return parser.to_json(output_format);
+	return {.excessive_quotes = true};
 }
 
-#define STYLE(X) u8"[" X "m"
+static std::string serialize(const utils::ini_parser& parser, bool output_format, bool output_ini)
+{
+	if (output_ini) return parser.to_ini(serialize_params());
+	#ifndef USE_SIMPLE
+	return parser.to_json(output_format);
+	#else
+	return "<N/A>";
+	#endif
+}
+
+#define STYLE(X) "[" X "m"
 #define STYLE_QUEUE rang::fgB::yellow
 #define STYLE_ERROR rang::fgB::red
 #define STYLE_SUCCESS rang::fgB::green
@@ -132,37 +140,37 @@ void do_debug_run()
 	const auto terminal_good = rang::rang_implementation::supportsColor()
 		&& rang::rang_implementation::isTerminal(std::cout.rdbuf())
 		&& rang::rang_implementation::supportsAnsi(std::cout.rdbuf());
-	if (terminal_good) std::cout << u8"[s";
+	if (terminal_good) std::cout << "[s";
 	auto clear = terminal_good;
 
-	for (const auto& entry : std::experimental::filesystem::directory_iterator("auto"))
+	for (const auto& entry : std::filesystem::directory_iterator("auto"))
 	{
 		if (entry.path().extension() == ".ini" && entry.path().native().find(L"__") == std::wstring::npos)
 		{
 			auto filename = utils::path(entry.path().native());
 			if (filename.filename().string()[2] != '_') continue;
 
-			std::cout << STYLE_QUEUE << u8"• Testing " << filename.filename_without_extension().string().substr(3) << u8"… " << rang::style::reset;
-			auto data = utils::ini_parser(true, {}).allow_lua(true).set_reader(&reader).set_error_handler(&handler).parse_file(filename).finalize().to_ini();
+			std::cout << STYLE_QUEUE << "• Testing " << filename.filename_without_extension().string().substr(3) << "… " << rang::style::reset;
+			auto data = utils::ini_parser(true, {}).allow_lua(true).set_reader(&reader).set_error_handler(&handler).parse_file(filename).finalize().to_ini(serialize_params());
 			auto required = filename.parent_path() / filename.filename_without_extension() + "__result.ini";
 
 			if (exists(required))
 			{
 				if (simple_reader().read(required) == data)
 				{
-					std::cout << STYLE_SUCCESS << u8"OK ✔" << rang::style::reset << std::endl;
+					std::cout << STYLE_SUCCESS << "OK ✔" << rang::style::reset << std::endl;
 				}
 				else
 				{
 					clear = false;
-					std::cout << STYLE_ERROR << u8"failed ⚠" << rang::style::reset << std::endl;
+					std::cout << STYLE_ERROR << "failed ⚠" << rang::style::reset << std::endl;
 					std::cout << data;
 				}
 			}
 			else
 			{
 				clear = false;
-				std::cout << STYLE_INFO << u8"new result ✳" << rang::style::reset << std::endl;
+				std::cout << STYLE_INFO << "new result ✳" << rang::style::reset << std::endl;
 				std::ofstream(required.wstring()) << data;
 			}
 		}
@@ -171,12 +179,12 @@ void do_debug_run()
 	const utils::path dev_input("dev/dev.ini");
 	if (exists(dev_input))
 	{
-		if (clear) std::cout << u8"[2J[u";
-		std::cout << STYLE_QUEUE << u8"• Running developing input:" << rang::style::reset << std::endl;
-		std::cout << utils::ini_parser(true, {}).allow_lua(true).set_reader(&reader).set_error_handler(&handler).parse_file(dev_input).finalize().to_ini();
+		if (clear) std::cout << "[2J[u";
+		std::cout << STYLE_QUEUE << "• Running developing input:" << rang::style::reset << std::endl;
+		std::cout << utils::ini_parser(true, {}).allow_lua(true).set_reader(&reader).set_error_handler(&handler).parse_file(dev_input).finalize().to_ini(serialize_params());
 	}
-
-	for (const auto& entry : std::experimental::filesystem::directory_iterator("performance"))
+	
+	for (const auto& entry : std::filesystem::directory_iterator("performance"))
 	{
 		if (entry.path().extension() == ".ini" && entry.path().native().find(L"__") == std::wstring::npos)
 		{
@@ -185,7 +193,7 @@ void do_debug_run()
 
 			const auto file_size = double(get_file_size(filename));
 
-			std::cout << STYLE_QUEUE << u8"• Measuring performance of " << filename.filename_without_extension().string().substr(3) << u8"… " << rang::style::reset;
+			std::cout << STYLE_QUEUE << "• Measuring performance of " << filename.filename_without_extension().string().substr(3) << "… " << rang::style::reset;
 			caching_reader c_reader;
 			if (utils::ini_parser(true, {}).allow_lua(true).set_reader(&c_reader).set_error_handler(&handler).parse_file(filename).finalize().get_sections().empty())
 			{
@@ -204,7 +212,7 @@ void do_debug_run()
 					}
 				}
 				const auto taken_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::high_resolution_clock::now() - start).count();
-				const auto taken_s = double(taken_ns) / 1e9; 
+				const auto taken_s = double(taken_ns) / 1e9;
 				const auto speed = double(run_count) * file_size / 1024 / 1024 / taken_s;
 				std::cout << STYLE_INFO << std::fixed << std::setprecision(2) << speed << " MB/s" << rang::style::reset << " ";
 			}
@@ -240,11 +248,14 @@ int main(int argc, const char* argv[])
 	std::vector<utils::path> resolve_within;
 	std::vector<utils::path> input_files;
 
-	resolve_within.push_back(std::experimental::filesystem::current_path().string());
+	resolve_within.push_back(utils::path(std::filesystem::current_path().string()));
 
 	#define GET_VALUE(SHORT, LONG, APPLY)\
 		else if (arg == "-d") { if (i == argc - 1) { show_usage(argv[0]); return 1; } APPLY(argv[i + 1]); }\
 		else if (arg.find("--destination=") == 0) APPLY(arg.substr(arg.find_first_of('=') + 1));
+	#define GET_PATH(SHORT, LONG, APPLY)\
+		else if (arg == "-d") { if (i == argc - 1) { show_usage(argv[0]); return 1; } APPLY(utils::path(argv[i + 1])); }\
+		else if (arg.find("--destination=") == 0) APPLY(utils::path(arg.substr(arg.find_first_of('=') + 1)));
 
 	for (auto i = 1; i < argc; i++)
 	{
@@ -271,8 +282,8 @@ int main(int argc, const char* argv[])
 		GET_VALUE(d, destination, destination=)
 		GET_VALUE(s, separator, separator=)
 		GET_VALUE(p, postfix, postfix=)
-		GET_VALUE(i, include, resolve_within.push_back)
-		else if (arg[0] != '-') input_files.push_back(arg);
+		GET_PATH(i, include, resolve_within.push_back)
+		else if (arg[0] != '-') input_files.push_back(utils::path(arg));
 	}
 
 	if (debug_run)
@@ -317,7 +328,7 @@ int main(int argc, const char* argv[])
 		std::cout << processed;
 		first = false;
 	}
-	
+
 	return handler.errors_reported ? 2 : handler.warnings_reported ? 1 : 0;
 	#ifndef THROW_STUFF
 	}

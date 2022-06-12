@@ -1,9 +1,11 @@
 ﻿#pragma once
 #include <utility/blob.h>
+#include <utility/variant.h>
+#include <utility/robin_hood.h>
 
 namespace utils
 {
-	class variant;
+	struct variant;
 
 	struct ini_parser_reader
 	{
@@ -28,7 +30,7 @@ namespace utils
 
 	struct ini_parser
 	{
-		using section = std::unordered_map<std::string, variant>;
+		using section = robin_hood::unordered_flat_map<std::string, variant>;
 		ini_parser();
 		ini_parser(bool allow_includes, const std::vector<path>& resolve_within);
 		~ini_parser();
@@ -37,6 +39,7 @@ namespace utils
 		ini_parser& set_error_handler(ini_parser_error_handler* handler);
 		ini_parser& set_data_provider(ini_parser_data_provider* data_provider);
 		ini_parser& allow_lua(bool value);
+		ini_parser& ignore_inactive(bool value);
 		
 		const ini_parser& parse(const char* data, int data_size) const;
 		const ini_parser& parse(const std::string& data) const;
@@ -44,15 +47,31 @@ namespace utils
 		const ini_parser& finalize() const;
 		void finalize_end() const;
 
-		const std::unordered_map<std::string, section>& get_sections() const;
-
-		std::string to_ini() const;
-		std::string to_json(bool format = false) const;
-
-		static std::string to_ini(const std::unordered_map<std::string, section>& sections);
-		static std::string to_json(const std::unordered_map<std::string, section>& sections, bool format = false);
+		const robin_hood::unordered_flat_map<std::string, section>& get_sections() const;
+		
+		struct serializer_params
+		{
+			bool excessive_quotes;
+			bool format;
+			std::function<bool(const std::string& key, const section& value)> section_filter;
+			std::function<int(const std::string& key, const section& value)> section_order;
+			std::function<bool(const std::string& key, const variant& value)> value_filter;
+			std::function<int(const std::string& key, const variant& value)> value_order;
+		};
+		
+		std::string to_ini(const serializer_params& params = {}) const;
+		std::string to_json(const serializer_params& params = {}) const;
+		static std::string to_ini(const robin_hood::unordered_flat_map<std::string, section>& sections, const serializer_params& params = {});
+		static std::string to_json(const robin_hood::unordered_flat_map<std::string, section>& sections, const serializer_params& params = {});
+		
 		static void set_std_lib(pblob data);
 		static void leaks_check(void (*callback)(const char*, long));
+		
+		static bool needs_quotes(int c, bool excessive_quotes = false);
+		static bool needs_quotes(const std::string& s, bool excessive_quotes = false);
+		static bool needs_quotes(const std::wstring& s, bool excessive_quotes = false);
+		static std::string set_quotes(const std::string& s, bool excessive_quotes = false);
+		static std::wstring set_quotes(const std::wstring& s, bool excessive_quotes = false);
 
 	private:
 		struct ini_parser_data* data_;

@@ -12,8 +12,8 @@
         "env": {
           "AC_ROOT": "D:/Games/Assetto Corsa",
           "CSP_ROOT": "C:/Development/acc-rendering-adv/source",
-          "LUA_JIT": "D:/Development/Temp/LuaJIT-2.1.0-beta3/src/luajit.exe",
-          "LUA_PATH": "D:/Development/Temp/LuaJIT-2.1.0-beta3/src/?.lua;;?.lua"
+          "LUA_JIT": "C:/Development/temp/luajit2-2.1-agentzh/src/luajit.exe",
+          "LUA_PATH": "C:/Development/temp/luajit2-2.1-agentzh/src/?.lua;?.lua",
         }
       },
       "group": {

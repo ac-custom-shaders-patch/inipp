@@ -42,7 +42,6 @@ end`;
     elseif type(L) ~= 'table' then return ${repeat(x => `L == R[${x + 1}]`, ' and ')}
     else return ${repeat(x => `L[${x + 1}] == (R[${x + 1}] and R[${x + 1}] or 0)`, ' and ')} end
   end,
-  __len = function (s) return s:length() end,
   __unm = function (s) return vec${D}(${repeat(x => `-s[${x + 1}]`)}) end,
   __tostring = function (s) return '{' ${repeat(x => `..s[${x + 1}]..`, '\', \'')} '}' end,
   __index = function (s, key)
@@ -234,7 +233,7 @@ for (let n in aliases){
 const codeFull = code.join('\n');
 const codeMinified = codeFull.replace(/\s\s+/g, ' ').replace(/\s([=~]=|[<>*+=-])\s/g, '$1').replace(/([,)'\]{}])\s/g, '$1').replace(/\s([('\[{}])/g, '$1')
 
-fs.writeFileSync('std.lua', codeFull);
+fs.writeFileSync('std.lua', codeMinified);
 fs.writeFileSync('../utility/ini_parser_lua_lib.h', `#pragma once
 
 namespace utils

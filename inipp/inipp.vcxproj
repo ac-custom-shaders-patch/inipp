@@ -30,7 +30,7 @@
     <ProjectGuid>{BDA69C36-0C88-45D0-9660-C90A6A67C6BC}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>inipp</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -62,7 +62,7 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v140</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
     <WholeProgramOptimization>true</WholeProgramOptimization>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
@@ -204,6 +204,8 @@
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -247,15 +249,19 @@
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="targetver.h" />
     <ClInclude Include="utility\alphanum.h" />
-    <ClInclude Include="utility\filesystem.h" />
+    <ClInclude Include="utility\helpers.h" />
     <ClInclude Include="utility\ini_parser.h" />
     <ClInclude Include="utility\ini_parser_lua_lib.h" />
     <ClInclude Include="utility\json.h" />
+    <ClInclude Include="utility\path.h" />
+    <ClInclude Include="utility\string_codecvt.h" />
     <ClInclude Include="utility\string_operations.h" />
     <ClInclude Include="utility\str_view.h" />
     <ClInclude Include="utility\variant.h" />
+    <ClInclude Include="utility\variant_parse.h" />
     <ClInclude Include="utility\xxhash\xxh3.h" />
     <ClInclude Include="utility\xxhash\xxhash.h" />
+    <ClInclude Include="utility\xxhash\xxhashpp.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="inipp.cpp" />
@@ -268,10 +274,11 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (run dev.ini only)|x64'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="utility\alphanum.cpp" />
-    <ClCompile Include="utility\filesystem.cpp" />
     <ClCompile Include="utility\ini_parser.cpp" />
+    <ClCompile Include="utility\path.cpp" />
     <ClCompile Include="utility\string_codecvt.cpp" />
     <ClCompile Include="utility\string_operations.cpp" />
+    <ClCompile Include="utility\string_parse.cpp" />
     <ClCompile Include="utility\str_view.cpp" />
     <ClCompile Include="utility\variant.cpp" />
     <ClCompile Include="utility\xxhash\xxhash.c">
@@ -281,7 +288,11 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (run dev.ini only)|Win32'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">NotUsing</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release (run dev.ini only)|x64'">NotUsing</PrecompiledHeader>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release (run dev.ini only)|x64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="utility\xxhash\xxhashpp.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

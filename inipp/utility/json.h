@@ -45,6 +45,8 @@ SOFTWARE.
 #include <numeric> // accumulate
 #include <string> // string, stoi, to_string
 #include <utility> // declval, forward, move, pair, swap
+#include <utility/std_ext.h>
+#include <utility/string_parse.h>
 
 // #include <nlohmann/json_fwd.hpp>
 #ifndef NLOHMANN_JSON_FWD_HPP
@@ -1367,7 +1369,7 @@ namespace detail
 /// proxy class for the items() function
 template<typename IteratorType> class iteration_proxy
 {
-  private:
+  public:
     /// helper class for iteration
     class iteration_proxy_internal
     {
@@ -2427,262 +2429,262 @@ class lexer
 	static const char* get_named_entity(const char* name)
 	{
 		const char* const NAMED_ENTITIES[][2] = {
-			{"AElig;", u8"Æ"},
-			{"Aacute;", u8"Á"},
-			{"Acirc;", u8"Â"},
-			{"Agrave;", u8"À"},
-			{"Alpha;", u8"Α"},
-			{"Aring;", u8"Å"},
-			{"Atilde;", u8"Ã"},
-			{"Auml;", u8"Ä"},
-			{"Beta;", u8"Β"},
-			{"Ccedil;", u8"Ç"},
-			{"Chi;", u8"Χ"},
-			{"Dagger;", u8"‡"},
-			{"Delta;", u8"Δ"},
-			{"ETH;", u8"Ð"},
-			{"Eacute;", u8"É"},
-			{"Ecirc;", u8"Ê"},
-			{"Egrave;", u8"È"},
-			{"Epsilon;", u8"Ε"},
-			{"Eta;", u8"Η"},
-			{"Euml;", u8"Ë"},
-			{"Gamma;", u8"Γ"},
-			{"Iacute;", u8"Í"},
-			{"Icirc;", u8"Î"},
-			{"Igrave;", u8"Ì"},
-			{"Iota;", u8"Ι"},
-			{"Iuml;", u8"Ï"},
-			{"Kappa;", u8"Κ"},
-			{"Lambda;", u8"Λ"},
-			{"Mu;", u8"Μ"},
-			{"Ntilde;", u8"Ñ"},
-			{"Nu;", u8"Ν"},
-			{"OElig;", u8"Œ"},
-			{"Oacute;", u8"Ó"},
-			{"Ocirc;", u8"Ô"},
-			{"Ograve;", u8"Ò"},
-			{"Omega;", u8"Ω"},
-			{"Omicron;", u8"Ο"},
-			{"Oslash;", u8"Ø"},
-			{"Otilde;", u8"Õ"},
-			{"Ouml;", u8"Ö"},
-			{"Phi;", u8"Φ"},
-			{"Pi;", u8"Π"},
-			{"Prime;", u8"″"},
-			{"Psi;", u8"Ψ"},
-			{"Rho;", u8"Ρ"},
-			{"Scaron;", u8"Š"},
-			{"Sigma;", u8"Σ"},
-			{"THORN;", u8"Þ"},
-			{"Tau;", u8"Τ"},
-			{"Theta;", u8"Θ"},
-			{"Uacute;", u8"Ú"},
-			{"Ucirc;", u8"Û"},
-			{"Ugrave;", u8"Ù"},
-			{"Upsilon;", u8"Υ"},
-			{"Uuml;", u8"Ü"},
-			{"Xi;", u8"Ξ"},
-			{"Yacute;", u8"Ý"},
-			{"Yuml;", u8"Ÿ"},
-			{"Zeta;", u8"Ζ"},
-			{"aacute;", u8"á"},
-			{"acirc;", u8"â"},
-			{"acute;", u8"´"},
-			{"aelig;", u8"æ"},
-			{"agrave;", u8"à"},
-			{"alefsym;", u8"ℵ"},
-			{"alpha;", u8"α"},
-			{"amp;", u8"&"},
-			{"and;", u8"∧"},
-			{"ang;", u8"∠"},
-			{"apos;", u8"'"},
-			{"aring;", u8"å"},
-			{"asymp;", u8"≈"},
-			{"atilde;", u8"ã"},
-			{"auml;", u8"ä"},
-			{"bdquo;", u8"„"},
-			{"beta;", u8"β"},
-			{"brvbar;", u8"¦"},
-			{"bull;", u8"•"},
-			{"cap;", u8"∩"},
-			{"ccedil;", u8"ç"},
-			{"cedil;", u8"¸"},
-			{"cent;", u8"¢"},
-			{"chi;", u8"χ"},
-			{"circ;", u8"ˆ"},
-			{"clubs;", u8"♣"},
-			{"colon;", u8":"},
-			{"commat;", u8"@"},
-			{"cong;", u8"≅"},
-			{"copy;", u8"©"},
-			{"crarr;", u8"↵"},
-			{"cup;", u8"∪"},
-			{"curren;", u8"¤"},
-			{"dArr;", u8"⇓"},
-			{"dagger;", u8"†"},
-			{"darr;", u8"↓"},
-			{"deg;", u8"°"},
-			{"delta;", u8"δ"},
-			{"diams;", u8"♦"},
-			{"divide;", u8"÷"},
-			{"eacute;", u8"é"},
-			{"ecirc;", u8"ê"},
-			{"egrave;", u8"è"},
-			{"empty;", u8"∅"},
-			{"emsp;", u8" "},
-			{"ensp;", u8" "},
-			{"epsilon;", u8"ε"},
-			{"equiv;", u8"≡"},
-			{"eta;", u8"η"},
-			{"eth;", u8"ð"},
-			{"euml;", u8"ë"},
-			{"euro;", u8"€"},
-			{"exist;", u8"∃"},
-			{"excl;", u8"!"},
-			{"fnof;", u8"ƒ"},
-			{"forall;", u8"∀"},
-			{"frac12;", u8"½"},
-			{"frac14;", u8"¼"},
-			{"frac34;", u8"¾"},
-			{"frasl;", u8"⁄"},
-			{"gamma;", u8"γ"},
-			{"ge;", u8"≥"},
-			{"gt;", u8">"},
-			{"hArr;", u8"⇔"},
-			{"harr;", u8"↔"},
-			{"hearts;", u8"♥"},
-			{"hellip;", u8"…"},
-			{"iacute;", u8"í"},
-			{"icirc;", u8"î"},
-			{"iexcl;", u8"¡"},
-			{"igrave;", u8"ì"},
-			{"image;", u8"ℑ"},
-			{"infin;", u8"∞"},
-			{"int;", u8"∫"},
-			{"iota;", u8"ι"},
-			{"iquest;", u8"¿"},
-			{"isin;", u8"∈"},
-			{"iuml;", u8"ï"},
-			{"kappa;", u8"κ"},
-			{"lArr;", u8"⇐"},
-			{"lambda;", u8"λ"},
-			{"lang;", u8"〈"},
-			{"laquo;", u8"«"},
-			{"larr;", u8"←"},
-			{"lceil;", u8"⌈"},
-			{"ldquo;", u8"“"},
-			{"le;", u8"≤"},
-			{"lfloor;", u8"⌊"},
-			{"lowast;", u8"∗"},
-			{"loz;", u8"◊"},
-			{"lrm;", u8"\xE2\x80\x8E"},
-			{"lsaquo;", u8"‹"},
-			{"lsquo;", u8"‘"},
-			{"lt;", u8"<"},
-			{"macr;", u8"¯"},
-			{"mdash;", u8"—"},
-			{"micro;", u8"µ"},
-			{"middot;", u8"·"},
-			{"minus;", u8"−"},
-			{"mu;", u8"μ"},
-			{"nabla;", u8"∇"},
-			{"nbsp;", u8" "},
-			{"ndash;", u8"–"},
-			{"ne;", u8"≠"},
-			{"ni;", u8"∋"},
-			{"not;", u8"¬"},
-			{"notin;", u8"∉"},
-			{"nsub;", u8"⊄"},
-			{"ntilde;", u8"ñ"},
-			{"nu;", u8"ν"},
-			{"oacute;", u8"ó"},
-			{"ocirc;", u8"ô"},
-			{"oelig;", u8"œ"},
-			{"ograve;", u8"ò"},
-			{"oline;", u8"‾"},
-			{"omega;", u8"ω"},
-			{"omicron;", u8"ο"},
-			{"oplus;", u8"⊕"},
-			{"or;", u8"∨"},
-			{"ordf;", u8"ª"},
-			{"ordm;", u8"º"},
-			{"oslash;", u8"ø"},
-			{"otilde;", u8"õ"},
-			{"otimes;", u8"⊗"},
-			{"ouml;", u8"ö"},
-			{"para;", u8"¶"},
-			{"part;", u8"∂"},
-			{"permil;", u8"‰"},
-			{"perp;", u8"⊥"},
-			{"phi;", u8"φ"},
-			{"pi;", u8"π"},
-			{"piv;", u8"ϖ"},
-			{"plusmn;", u8"±"},
-			{"pound;", u8"£"},
-			{"prime;", u8"′"},
-			{"prod;", u8"∏"},
-			{"prop;", u8"∝"},
-			{"psi;", u8"ψ"},
-			{"quot;", u8"\""},
-			{"rArr;", u8"⇒"},
-			{"radic;", u8"√"},
-			{"rang;", u8"〉"},
-			{"raquo;", u8"»"},
-			{"rarr;", u8"→"},
-			{"rceil;", u8"⌉"},
-			{"rdquo;", u8"”"},
-			{"real;", u8"ℜ"},
-			{"reg;", u8"®"},
-			{"rfloor;", u8"⌋"},
-			{"rho;", u8"ρ"},
-			{"rlm;", u8"\xE2\x80\x8F"},
-			{"rsaquo;", u8"›"},
-			{"rsquo;", u8"’"},
-			{"sbquo;", u8"‚"},
-			{"scaron;", u8"š"},
-			{"sdot;", u8"⋅"},
-			{"sect;", u8"§"},
-			{"shy;", u8"\xC2\xAD"},
-			{"sigma;", u8"σ"},
-			{"sigmaf;", u8"ς"},
-			{"sim;", u8"∼"},
-			{"spades;", u8"♠"},
-			{"sub;", u8"⊂"},
-			{"sube;", u8"⊆"},
-			{"sum;", u8"∑"},
-			{"sup;", u8"⊃"},
-			{"sup1;", u8"¹"},
-			{"sup2;", u8"²"},
-			{"sup3;", u8"³"},
-			{"supe;", u8"⊇"},
-			{"szlig;", u8"ß"},
-			{"tau;", u8"τ"},
-			{"there4;", u8"∴"},
-			{"theta;", u8"θ"},
-			{"thetasym;", u8"ϑ"},
-			{"thinsp;", u8" "},
-			{"thorn;", u8"þ"},
-			{"tilde;", u8"˜"},
-			{"times;", u8"×"},
-			{"trade;", u8"™"},
-			{"uArr;", u8"⇑"},
-			{"uacute;", u8"ú"},
-			{"uarr;", u8"↑"},
-			{"ucirc;", u8"û"},
-			{"ugrave;", u8"ù"},
-			{"uml;", u8"¨"},
-			{"upsih;", u8"ϒ"},
-			{"upsilon;", u8"υ"},
-			{"uuml;", u8"ü"},
-			{"weierp;", u8"℘"},
-			{"xi;", u8"ξ"},
-			{"yacute;", u8"ý"},
-			{"yen;", u8"¥"},
-			{"yuml;", u8"ÿ"},
-			{"zeta;", u8"ζ"},
-			{"zwj;", u8"\xE2\x80\x8D"},
-			{"zwnj;", u8"\xE2\x80\x8C"}
+			{"AElig;", "Æ"},
+			{"Aacute;", "Á"},
+			{"Acirc;", "Â"},
+			{"Agrave;", "À"},
+			{"Alpha;", "Α"},
+			{"Aring;", "Å"},
+			{"Atilde;", "Ã"},
+			{"Auml;", "Ä"},
+			{"Beta;", "Β"},
+			{"Ccedil;", "Ç"},
+			{"Chi;", "Χ"},
+			{"Dagger;", "‡"},
+			{"Delta;", "Δ"},
+			{"ETH;", "Ð"},
+			{"Eacute;", "É"},
+			{"Ecirc;", "Ê"},
+			{"Egrave;", "È"},
+			{"Epsilon;", "Ε"},
+			{"Eta;", "Η"},
+			{"Euml;", "Ë"},
+			{"Gamma;", "Γ"},
+			{"Iacute;", "Í"},
+			{"Icirc;", "Î"},
+			{"Igrave;", "Ì"},
+			{"Iota;", "Ι"},
+			{"Iuml;", "Ï"},
+			{"Kappa;", "Κ"},
+			{"Lambda;", "Λ"},
+			{"Mu;", "Μ"},
+			{"Ntilde;", "Ñ"},
+			{"Nu;", "Ν"},
+			{"OElig;", "Œ"},
+			{"Oacute;", "Ó"},
+			{"Ocirc;", "Ô"},
+			{"Ograve;", "Ò"},
+			{"Omega;", "Ω"},
+			{"Omicron;", "Ο"},
+			{"Oslash;", "Ø"},
+			{"Otilde;", "Õ"},
+			{"Ouml;", "Ö"},
+			{"Phi;", "Φ"},
+			{"Pi;", "Π"},
+			{"Prime;", "″"},
+			{"Psi;", "Ψ"},
+			{"Rho;", "Ρ"},
+			{"Scaron;", "Š"},
+			{"Sigma;", "Σ"},
+			{"THORN;", "Þ"},
+			{"Tau;", "Τ"},
+			{"Theta;", "Θ"},
+			{"Uacute;", "Ú"},
+			{"Ucirc;", "Û"},
+			{"Ugrave;", "Ù"},
+			{"Upsilon;", "Υ"},
+			{"Uuml;", "Ü"},
+			{"Xi;", "Ξ"},
+			{"Yacute;", "Ý"},
+			{"Yuml;", "Ÿ"},
+			{"Zeta;", "Ζ"},
+			{"aacute;", "á"},
+			{"acirc;", "â"},
+			{"acute;", "´"},
+			{"aelig;", "æ"},
+			{"agrave;", "à"},
+			{"alefsym;", "ℵ"},
+			{"alpha;", "α"},
+			{"amp;", "&"},
+			{"and;", "∧"},
+			{"ang;", "∠"},
+			{"apos;", "'"},
+			{"aring;", "å"},
+			{"asymp;", "≈"},
+			{"atilde;", "ã"},
+			{"auml;", "ä"},
+			{"bdquo;", "„"},
+			{"beta;", "β"},
+			{"brvbar;", "¦"},
+			{"bull;", "•"},
+			{"cap;", "∩"},
+			{"ccedil;", "ç"},
+			{"cedil;", "¸"},
+			{"cent;", "¢"},
+			{"chi;", "χ"},
+			{"circ;", "ˆ"},
+			{"clubs;", "♣"},
+			{"colon;", ":"},
+			{"commat;", "@"},
+			{"cong;", "≅"},
+			{"copy;", "©"},
+			{"crarr;", "↵"},
+			{"cup;", "∪"},
+			{"curren;", "¤"},
+			{"dArr;", "⇓"},
+			{"dagger;", "†"},
+			{"darr;", "↓"},
+			{"deg;", "°"},
+			{"delta;", "δ"},
+			{"diams;", "♦"},
+			{"divide;", "÷"},
+			{"eacute;", "é"},
+			{"ecirc;", "ê"},
+			{"egrave;", "è"},
+			{"empty;", "∅"},
+			{"emsp;", " "},
+			{"ensp;", " "},
+			{"epsilon;", "ε"},
+			{"equiv;", "≡"},
+			{"eta;", "η"},
+			{"eth;", "ð"},
+			{"euml;", "ë"},
+			{"euro;", "€"},
+			{"exist;", "∃"},
+			{"excl;", "!"},
+			{"fnof;", "ƒ"},
+			{"forall;", "∀"},
+			{"frac12;", "½"},
+			{"frac14;", "¼"},
+			{"frac34;", "¾"},
+			{"frasl;", "⁄"},
+			{"gamma;", "γ"},
+			{"ge;", "≥"},
+			{"gt;", ">"},
+			{"hArr;", "⇔"},
+			{"harr;", "↔"},
+			{"hearts;", "♥"},
+			{"hellip;", "…"},
+			{"iacute;", "í"},
+			{"icirc;", "î"},
+			{"iexcl;", "¡"},
+			{"igrave;", "ì"},
+			{"image;", "ℑ"},
+			{"infin;", "∞"},
+			{"int;", "∫"},
+			{"iota;", "ι"},
+			{"iquest;", "¿"},
+			{"isin;", "∈"},
+			{"iuml;", "ï"},
+			{"kappa;", "κ"},
+			{"lArr;", "⇐"},
+			{"lambda;", "λ"},
+			{"lang;", "〈"},
+			{"laquo;", "«"},
+			{"larr;", "←"},
+			{"lceil;", "⌈"},
+			{"ldquo;", "“"},
+			{"le;", "≤"},
+			{"lfloor;", "⌊"},
+			{"lowast;", "∗"},
+			{"loz;", "◊"},
+			{"lrm;", "\xE2\x80\x8E"},
+			{"lsaquo;", "‹"},
+			{"lsquo;", "‘"},
+			{"lt;", "<"},
+			{"macr;", "¯"},
+			{"mdash;", "—"},
+			{"micro;", "µ"},
+			{"middot;", "·"},
+			{"minus;", "−"},
+			{"mu;", "μ"},
+			{"nabla;", "∇"},
+			{"nbsp;", " "},
+			{"ndash;", "–"},
+			{"ne;", "≠"},
+			{"ni;", "∋"},
+			{"not;", "¬"},
+			{"notin;", "∉"},
+			{"nsub;", "⊄"},
+			{"ntilde;", "ñ"},
+			{"nu;", "ν"},
+			{"oacute;", "ó"},
+			{"ocirc;", "ô"},
+			{"oelig;", "œ"},
+			{"ograve;", "ò"},
+			{"oline;", "‾"},
+			{"omega;", "ω"},
+			{"omicron;", "ο"},
+			{"oplus;", "⊕"},
+			{"or;", "∨"},
+			{"ordf;", "ª"},
+			{"ordm;", "º"},
+			{"oslash;", "ø"},
+			{"otilde;", "õ"},
+			{"otimes;", "⊗"},
+			{"ouml;", "ö"},
+			{"para;", "¶"},
+			{"part;", "∂"},
+			{"permil;", "‰"},
+			{"perp;", "⊥"},
+			{"phi;", "φ"},
+			{"pi;", "π"},
+			{"piv;", "ϖ"},
+			{"plusmn;", "±"},
+			{"pound;", "£"},
+			{"prime;", "′"},
+			{"prod;", "∏"},
+			{"prop;", "∝"},
+			{"psi;", "ψ"},
+			{"quot;", "\""},
+			{"rArr;", "⇒"},
+			{"radic;", "√"},
+			{"rang;", "〉"},
+			{"raquo;", "»"},
+			{"rarr;", "→"},
+			{"rceil;", "⌉"},
+			{"rdquo;", "”"},
+			{"real;", "ℜ"},
+			{"reg;", "®"},
+			{"rfloor;", "⌋"},
+			{"rho;", "ρ"},
+			{"rlm;", "\xE2\x80\x8F"},
+			{"rsaquo;", "›"},
+			{"rsquo;", "’"},
+			{"sbquo;", "‚"},
+			{"scaron;", "š"},
+			{"sdot;", "⋅"},
+			{"sect;", "§"},
+			{"shy;", "\xC2\xAD"},
+			{"sigma;", "σ"},
+			{"sigmaf;", "ς"},
+			{"sim;", "∼"},
+			{"spades;", "♠"},
+			{"sub;", "⊂"},
+			{"sube;", "⊆"},
+			{"sum;", "∑"},
+			{"sup;", "⊃"},
+			{"sup1;", "¹"},
+			{"sup2;", "²"},
+			{"sup3;", "³"},
+			{"supe;", "⊇"},
+			{"szlig;", "ß"},
+			{"tau;", "τ"},
+			{"there4;", "∴"},
+			{"theta;", "θ"},
+			{"thetasym;", "ϑ"},
+			{"thinsp;", " "},
+			{"thorn;", "þ"},
+			{"tilde;", "˜"},
+			{"times;", "×"},
+			{"trade;", "™"},
+			{"uArr;", "⇑"},
+			{"uacute;", "ú"},
+			{"uarr;", "↑"},
+			{"ucirc;", "û"},
+			{"ugrave;", "ù"},
+			{"uml;", "¨"},
+			{"upsih;", "ϒ"},
+			{"upsilon;", "υ"},
+			{"uuml;", "ü"},
+			{"weierp;", "℘"},
+			{"xi;", "ξ"},
+			{"yacute;", "ý"},
+			{"yen;", "¥"},
+			{"yuml;", "ÿ"},
+			{"zeta;", "ζ"},
+			{"zwj;", "\xE2\x80\x8D"},
+			{"zwnj;", "\xE2\x80\x8C"}
 		};
 
 #ifdef USE_SIMPLE
@@ -4488,10 +4490,11 @@ class json_sax_dom_parser
         else
         {
             assert(ref_stack.back()->is_array() or ref_stack.back()->is_object());
-            if (ref_stack.back()->is_array())
+			auto& b = ref_stack.back();
+            if (b->is_array())
             {
-                ref_stack.back()->m_value.array->emplace_back(std::forward<Value>(v));
-                return &(ref_stack.back()->m_value.array->back());
+                b->m_value.array->emplace_back(std::forward<Value>(v));
+                return &(b->m_value.array->back());
             }
             else
             {
@@ -4627,13 +4630,14 @@ class json_sax_dom_callback_parser
         if (not ref_stack.empty() and ref_stack.back())
         {
             // remove discarded value
-            if (ref_stack.back()->is_object())
+			auto& b = ref_stack.back();
+            if (b->is_object())
             {
-                for (auto it = ref_stack.back()->begin(); it != ref_stack.back()->end(); ++it)
+                for (auto it = b->begin(); it != b->end(); ++it)
                 {
                     if (it->is_discarded())
                     {
-                        ref_stack.back()->erase(it);
+                        b->erase(it);
                         break;
                     }
                 }
@@ -4783,10 +4787,11 @@ class json_sax_dom_callback_parser
             }
 
             assert(ref_stack.back()->is_array() or ref_stack.back()->is_object());
-            if (ref_stack.back()->is_array())
+			auto& b = ref_stack.back();
+            if (b->is_array())
             {
-                ref_stack.back()->m_value.array->push_back(std::move(value));
-                return {true, &(ref_stack.back()->m_value.array->back())};
+                b->m_value.array->push_back(std::move(value));
+                return {true, &(b->m_value.array->back())};
             }
             else
             {
@@ -7064,6 +7069,9 @@ class binary_reader
             case 0xBD:
             case 0xBE:
             case 0xBF:
+            case 0xD9: // str 8
+            case 0xDA: // str 16
+            case 0xDB: // str 32
             {
                 string_t s;
                 return get_msgpack_string(s) and sax->string(s);
@@ -7136,14 +7144,6 @@ class binary_reader
             {
                 int64_t number;
                 return get_number(number) and sax->number_integer(number);
-            }
-
-            case 0xD9: // str 8
-            case 0xDA: // str 16
-            case 0xDB: // str 32
-            {
-                string_t s;
-                return get_msgpack_string(s) and sax->string(s);
             }
 
             case 0xDC: // array 16
@@ -8074,20 +8074,20 @@ class binary_reader
     }
 
   private:
+    /// the SAX parser
+    json_sax_t* sax = nullptr;
+
+    /// the number of characters read
+    std::size_t chars_read = 0;
+
     /// input adapter
     input_adapter_t ia = nullptr;
 
     /// the current character
     int current = std::char_traits<char>::eof();
 
-    /// the number of characters read
-    std::size_t chars_read = 0;
-
     /// whether we can assume little endianess
     const bool is_little_endian = little_endianess();
-
-    /// the SAX parser
-    json_sax_t* sax = nullptr;
 };
 }
 }
@@ -9643,7 +9643,7 @@ Generates V = buffer * 10^decimal_exponent, such that M- <= V <= M+.
 M- and M+ must be normalized and share the same exponent -60 <= e <= -32.
 */
 inline void grisu2_digit_gen(char* buffer, int& length, int& decimal_exponent,
-                             diyfp M_minus, diyfp w, diyfp M_plus)
+                             const diyfp& M_minus, const diyfp& w, const diyfp& M_plus)
 {
     static_assert(kAlpha >= -60, "internal error");
     static_assert(kGamma <= -32, "internal error");
@@ -9883,7 +9883,7 @@ len is the length of the buffer (number of decimal digits)
 The buffer must be large enough, i.e. >= max_digits10.
 */
 inline void grisu2(char* buf, int& len, int& decimal_exponent,
-                   diyfp m_minus, diyfp v, diyfp m_plus)
+                   const diyfp& m_minus, const diyfp& v, const diyfp& m_plus)
 {
     assert(m_plus.e == m_minus.e);
     assert(m_plus.e == v.e);
@@ -12470,10 +12470,6 @@ class basic_json
                 default:
                 {
                     object = nullptr;  // silence warning, see #821
-                    if (JSON_UNLIKELY(t == value_t::null))
-                    {
-                        JSON_THROW(other_error::create(500, "961c151d2e87f2686a955a9be24d316f1362bf21 3.2.0")); // LCOV_EXCL_LINE
-                    }
                     break;
                 }
             }
@@ -13531,6 +13527,201 @@ class basic_json
     {
         return m_type;
     }
+
+	// CSP: custom safe conversions
+	template <typename T> struct converter
+	{
+		static T as(const basic_json& that, T fallback_value = {}) noexcept
+		{
+			return T::from_json(that, fallback_value);
+		}
+	};
+
+	template <> struct converter<math::float3>
+	{
+		static math::float3 str_to_f3(std::string r)
+		{
+			auto v = utils::str_view::from_str(r);
+			v.trim("() \t\n\r");
+			auto s = v.split(',', false, true);
+			return s.size() >= 3 ? math::float3(utils::parse(s[0], 0.f), utils::parse(s[1], 0.f), utils::parse(s[2], 0.f)) : math::float3(utils::parse(s[0], 0.f));
+		}
+
+		static math::float3 as(const basic_json& that, math::float3 fallback_value = {}) noexcept
+		{
+			if (that.is_string()) return str_to_f3(that.template get<std::string>());
+			if (that.is_number()) return math::float3(that.template get<float>());
+			if (that.is_boolean()) return math::float3(that.template get<bool>() ? 1.f : 0.f);
+			return fallback_value;
+		}
+	};
+
+	template <> struct converter<std::string>
+	{
+		static std::string as(const basic_json& that, std::string fallback_value = {}) noexcept
+		{
+			if (that.is_string()) return that.template get<std::string>();
+			if (that.is_number()) return std::to_string(that.template get<float>());
+			if (that.is_boolean()) return that.template get<bool>() ? "true" : "false";
+			return fallback_value;
+		}
+	};
+
+	template <> struct converter<std::wstring>
+	{
+		static std::wstring as(const basic_json& that, std::wstring fallback_value = {}) noexcept
+		{
+			if (that.is_string()) return utils::utf16(that.template get<std::string>());
+			if (that.is_number()) return std::to_wstring(that.template get<float>());
+			if (that.is_boolean()) return that.template get<bool>() ? L"true" : L"false";
+			return fallback_value;
+		}
+	};
+
+	template <> struct converter<bool>
+	{
+		static bool as(const basic_json& that, bool fallback_value = {}) noexcept
+		{
+			if (that.is_boolean()) return that.template get<bool>();
+			if (that.is_number()) return that.template get<float>() != 0.f;
+			if (that.is_string()) return !(that.template get<std::string>()).empty();
+			if (that.is_object() || that.is_array()) return true;
+			return fallback_value;
+		}
+	};
+
+	template <> struct converter<float>
+	{
+		static float as(const basic_json& that, float fallback_value = {}) noexcept
+		{
+			if (that.is_number_integer()) return float(that.template get<int>());
+			if (that.is_number_float()) return that.template get<float>();
+			if (that.is_boolean()) return that.template get<bool>() ? 1.f : 0.f;
+			if (that.is_string()) return utils::parse(that.template get<std::string>(), fallback_value);
+			return fallback_value;
+		}
+	};
+
+	template <> struct converter<int32_t>
+	{
+		static int as(const basic_json& that, int fallback_value = {}) noexcept
+		{
+			if (that.is_number_integer()) return that.template get<int>();
+			if (that.is_number_float()) return int(that.template get<float>());
+			if (that.is_boolean()) return that.template get<bool>() ? 1 : 0;
+			if (that.is_string()) return utils::parse(that.template get<std::string>(), fallback_value);
+			return fallback_value;
+		}
+	};
+
+	template <> struct converter<uint32_t>
+	{
+		static uint32_t as(const basic_json& that, uint32_t fallback_value = {}) noexcept
+		{
+			if (that.is_number_unsigned()) return that.template get<uint32_t>();
+			auto v = that.as<int32_t>(int32_t(fallback_value));
+			return v < 0 ? 0U : uint32_t(v);
+		}
+	};
+
+	template <> struct converter<int64_t>
+	{
+		static int64_t as(const basic_json& that, int64_t fallback_value = {}) noexcept
+		{
+			if (that.is_number_integer()) return that.template get<int64_t>();
+			if (that.is_number_float()) return int64_t(that.template get<double>());
+			if (that.is_boolean()) return that.template get<bool>() ? 1LL : 0LL;
+			if (that.is_string()) return utils::parse(that.template get<std::string>(), fallback_value);
+			return fallback_value;
+		}
+	};
+
+	template <> struct converter<uint64_t>
+	{
+		static uint64_t as(const basic_json& that, uint64_t fallback_value = {}) noexcept
+		{
+			if (that.is_number_unsigned()) return that.template get<uint64_t>();
+			auto v = that.as<int64_t>(int64_t(fallback_value));
+			return v < 0 ? 0ULL : uint64_t(v);
+		}
+	};
+
+	template <typename T> struct converter<std::vector<T>>
+	{
+		static std::vector<T> as(const basic_json& that, std::vector<T> fallback_value = {}) noexcept
+		{
+			if (that.is_array())
+			{
+				std::vector<T> r;
+				for (auto i : that.items())
+				{
+					r.push_back(i.value().template as<T>());
+				}
+				return r;
+			}
+			return fallback_value;
+		}
+	};
+
+	template<typename T>
+	static T fit_key(const std::string& s) = delete;
+
+	template<>
+	static std::string fit_key<>(const std::string& s) { return s; }
+
+	template<>
+	static std::wstring fit_key<>(const std::string& s) { return utils::utf16(s); }
+
+	template <typename TKey, typename TValue> struct converter<std::unordered_map<TKey, TValue>>
+	{
+		static std::unordered_map<TKey, TValue> as(const basic_json& that, std::unordered_map<TKey, TValue> fallback_value = {}) noexcept
+		{
+			if (that.is_object())
+			{
+				std::unordered_map<TKey, TValue> r;
+				for (auto i : that.items())
+				{
+					r[fit_key<TKey>(i.key())] = i.value().template as<TValue>();
+				}
+				return r;
+			}
+			return fallback_value;
+		}
+	};
+
+	template<typename T>
+	T as(T fallback_value = {}) const noexcept
+	{
+		return converter<T>::as(*this, fallback_value);
+	}
+
+	template<typename Callback>
+	auto map(Callback callback) const noexcept
+	{
+		std::vector<std::invoke_result_t<Callback, const detail::iteration_proxy<detail::iter_impl<const basic_json<>>>::iteration_proxy_internal&>> ret;
+		for (const auto& i : items())
+		{
+			ret.emplace_back(callback(i));
+		}
+		return ret;
+	}
+	
+	std::string str() const noexcept { return as<std::string>(); }
+	std::wstring wstr() const noexcept { return as<std::wstring>(); }
+
+	std::string stringify() const
+	{
+		std::stringstream r;
+		r << std::setw(2) << *this;
+		return r.str();
+	}
+
+	utils::blob blob() const
+	{
+		std::stringstream r;
+		r << std::setw(2) << *this;
+		return utils::blob(r.str());
+	}
 
     /*!
     @brief return whether type is primitive
@@ -14823,14 +15014,24 @@ class basic_json
     template<typename T>
     const_reference operator[](T* key) const
     {
+		if (!is_object()) return return_null();
+		const auto f = m_value.object->find(key);
+        return f != m_value.object->end() ? f->second : return_null();
+
         // at only works for objects
-        if (JSON_LIKELY(is_object()))
+        /*if (JSON_LIKELY(is_object()))
         {
             assert(m_value.object->find(key) != m_value.object->end());
             return m_value.object->find(key)->second;
         }
 
-        JSON_THROW(type_error::create(305, "cannot use operator[] with " + std::string(type_name())));
+        JSON_THROW(type_error::create(305, "cannot use operator[] with " + std::string(type_name())));*/
+    }
+
+	static const_reference return_null()
+    {
+		static basic_json ret;
+		return ret;
     }
 
     /*!
@@ -17229,7 +17430,7 @@ class basic_json
     @copydoc operator<(const_reference, const_reference)
     */
     template<typename ScalarType, typename std::enable_if<
-                 std::is_scalar<ScalarType>::value, int>::type = 0>
+                 std::is_scalar_v<ScalarType>, int>::type = 0>
     friend bool operator<(const_reference lhs, const ScalarType rhs) noexcept
     {
         return (lhs < basic_json(rhs));
@@ -17240,7 +17441,7 @@ class basic_json
     @copydoc operator<(const_reference, const_reference)
     */
     template<typename ScalarType, typename std::enable_if<
-                 std::is_scalar<ScalarType>::value, int>::type = 0>
+                 std::is_scalar_v<ScalarType>, int>::type = 0>
     friend bool operator<(const ScalarType lhs, const_reference rhs) noexcept
     {
         return (basic_json(lhs) < rhs);
@@ -17525,13 +17726,19 @@ class basic_json
 
     @since version 2.0.3 (contiguous containers)
     */
-    static basic_json parse(detail::input_adapter&& i,
+    static basic_json parse_nocomments(detail::input_adapter&& i,
                             const parser_callback_t cb = nullptr,
                             const bool allow_exceptions = true)
     {
         basic_json result;
         parser(i, cb, allow_exceptions).parse(true, result);
         return result;
+    }
+	
+    static basic_json parse(const std::string& str, const bool allow_exceptions = true)
+    {
+		if (str.find_first_of('/') != std::string::npos) return parse_nocomments(std_ext::remove_comments(str), nullptr, allow_exceptions);
+        return parse_nocomments(std_ext::remove_comments(str), nullptr, allow_exceptions);
     }
 
     static bool accept(detail::input_adapter&& i)
